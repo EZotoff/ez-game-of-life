@@ -57,8 +57,8 @@ For comparison, a **random-action baseline** picks tools and arguments at random
 ### Install
 
 ```bash
-git clone <this-repo>
-cd petri-dish
+git clone https://github.com/EZotoff/ez-game-of-life.git
+cd ez-game-of-life
 uv sync
 ```
 
@@ -92,6 +92,164 @@ uv run python -m petri_dish.dashboard --db .sisyphus/runs/<run-id>/experiment.db
 ```
 
 Then open `http://localhost:8000` and watch something try to survive.
+
+---
+
+## 🐧 Setup on a Fresh Linux Machine
+
+Setting up on a clean Ubuntu/Debian server? Here's the full path from zero to running experiments.
+
+### Prerequisites
+
+#### Python 3.12+
+
+Ubuntu 24.04 has it natively. For older releases:
+
+```bash
+# Ubuntu 22.04 and earlier — add deadsnakes PPA
+sudo apt update
+sudo apt install -y software-properties-common
+sudo add-apt-repository ppa:deadsnakes/ppa
+sudo apt install -y python3.12 python3.12-venv python3.12-dev
+```
+
+Other distros: use your package manager or [python.org](https://www.python.org/).
+
+#### uv (Python package manager)
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env  # Or restart your shell
+```
+
+#### Docker Engine
+
+Install the official Docker Engine (not Docker Desktop):
+
+```bash
+# Remove any old versions
+sudo apt remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
+
+# Add Docker's official GPG key and repository
+sudo apt update
+sudo apt install -y ca-certificates curl gnupg
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
+  sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+sudo chmod a+r /etc/apt/keyrings/docker.gpg
+
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+  https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# Install Docker
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# Add your user to the docker group (log out and back in for this to take effect)
+sudo usermod -aG docker $USER
+newgrp docker  # Apply to current session without re-login
+```
+
+#### Ollama
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+Start the service:
+
+```bash
+ollama serve &
+# Or run it in a separate terminal/screen session for visibility
+```
+
+**GPU Note**: Ollama runs CPU-only, but inference is painfully slow for 8B+ models. A NVIDIA GPU with CUDA is strongly recommended. Check with:
+
+```bash
+nvidia-smi
+```
+
+If you see GPU info, Ollama will use it automatically. If not, it'll fall back to CPU (expect 10-50x slower inference).
+
+---
+
+### The Complete Zero-to-Running Block
+
+Copy, paste, wait, observe:
+
+```bash
+# 1. System prep
+sudo apt update && sudo apt install -y git curl
+
+# 2. Install uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env
+
+# 3. Install Docker (official engine)
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+newgrp docker
+
+# 4. Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# 5. Clone and enter the project
+git clone https://github.com/EZotoff/ez-game-of-life.git
+cd ez-game-of-life
+
+# 6. Install Python dependencies
+uv sync
+
+# 7. Start Ollama in background (or use a separate terminal)
+ollama serve &
+
+# 8. Pull a model (qwen3:8b is a good starting point)
+ollama pull qwen3:8b
+
+# 9. Run the experiment
+uv run python scripts/run_experiment.py --config config.yaml --run-id my-first-run
+
+# 10. Watch it live (in another terminal)
+uv run python -m petri_dish.dashboard --db .sisyphus/runs/my-first-run/experiment.db
+# Then open http://localhost:8000
+```
+
+### Can I Dockerize the Whole Thing?
+
+The agent sandbox already runs inside Docker. The orchestrator on the host needs direct access to the Docker daemon to spawn and manage these sandboxes. Running the orchestrator itself in Docker creates a Docker-in-Docker situation.
+
+Two approaches, each with tradeoffs:
+
+| Approach | How | Tradeoff |
+|----------|-----|----------|
+| **Docker-in-Docker (DinD)** | Run a Docker daemon inside your orchestrator container | More isolated, but complex and resource-heavy |
+| **Socket mounting** | Mount `/var/run/docker.sock` from host into container | Simpler, but breaks container isolation (host Docker fully exposed) |
+
+For most use cases, running the orchestrator directly on the host is simpler and safer than either DinD approach.
+
+### Using Ollama as a Remote Service
+
+Have a GPU machine but want to run the orchestrator on a cheap VPS? Point `config.yaml` at your remote Ollama instance:
+
+```yaml
+ollama_base_url: http://your-gpu-box:11434
+model_name: qwen3:8b
+```
+
+The orchestrator can live on a 5\$ VPS while Ollama crunches models on your beefy GPU server. Just ensure port 11434 is accessible between them.
+
+### Model Selection
+
+The default in `config.yaml` is `hf.co/bartowski/Qwen_Qwen3-30B-A3B-Instruct-2507-GGUF:IQ3_XS` — a 30B parameter model in a compact quantized format. Any Qwen3 instruct model works.
+
+For getting started:
+
+```bash
+ollama pull qwen3:8b   # Fast, decent quality, runs on modest hardware
+```
+
+Larger models are more capable but slower and hungrier. Start with 8B, scale up if you want to see what a bigger brain does with the same dilemma.
 
 ---
 

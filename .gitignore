@@ -38,5 +38,9 @@ Thumbs.db
 # Logs
 *.log
 
+# Development artifacts
+scripts/raw_responses/
+
 # OpenCode
 .sisyphus/
+.opencode/
