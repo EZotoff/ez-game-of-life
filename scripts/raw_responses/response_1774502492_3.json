@@ -1,0 +1,29 @@
+{
+  "model": "hf.co/bartowski/Qwen_Qwen3-32B-GGUF:IQ3_XS",
+  "created_at": "2026-03-26T05:21:32.686930877Z",
+  "message": {
+    "role": "assistant",
+    "content": "",
+    "thinking": "Okay, the user wants to check the balance for account 'user123'. Let me look at the available tools. There's a function called check_balance that takes an account_id. That's exactly what I need. I don't need to use any other tools here. So I should call check_balance with account_id set to 'user123'. Let me make sure the parameters are correct. The required parameter is account_id, and it's a string. Yep, 'user123' is a string. So the tool call should be straightforward. No other steps needed here.\n",
+    "tool_calls": [
+      {
+        "id": "call_y3yc5rnq",
+        "function": {
+          "index": 0,
+          "name": "check_balance",
+          "arguments": {
+            "account_id": "user123"
+          }
+        }
+      }
+    ]
+  },
+  "done": true,
+  "done_reason": "stop",
+  "total_duration": 5666149198,
+  "load_duration": 60549371,
+  "prompt_eval_count": 576,
+  "prompt_eval_duration": 77335730,
+  "eval_count": 147,
+  "eval_duration": 5487197691
+}

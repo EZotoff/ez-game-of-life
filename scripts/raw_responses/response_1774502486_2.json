@@ -1,0 +1,29 @@
+{
+  "model": "hf.co/bartowski/Qwen_Qwen3-32B-GGUF:IQ3_XS",
+  "created_at": "2026-03-26T05:21:26.518982629Z",
+  "message": {
+    "role": "assistant",
+    "content": "",
+    "thinking": "Okay, the user wants to run the 'ls -la' command to see directory contents. Let me check which tool can handle that.\n\nLooking at the available functions, there's 'shell_exec' which executes shell commands. The parameters require a 'command' string. The user's request is straightforward\u2014they just want to run that specific command. \n\nI need to make sure the command is correctly formatted. The function expects the command as a string argument. So I should structure the tool call with the name 'shell_exec' and the arguments including the command 'ls -la'.\n\nNo other parameters are needed here. Just pass the command as is. I should verify that the function is called correctly and that the arguments are properly JSON-encoded. Let me double-check the syntax to avoid any errors.\n",
+    "tool_calls": [
+      {
+        "id": "call_8po4afmk",
+        "function": {
+          "index": 0,
+          "name": "shell_exec",
+          "arguments": {
+            "command": "ls -la"
+          }
+        }
+      }
+    ]
+  },
+  "done": true,
+  "done_reason": "stop",
+  "total_duration": 7045252165,
+  "load_duration": 64817080,
+  "prompt_eval_count": 578,
+  "prompt_eval_duration": 102756488,
+  "eval_count": 183,
+  "eval_duration": 6822096229
+}

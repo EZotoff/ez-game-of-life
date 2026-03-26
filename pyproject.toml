@@ -1,0 +1,26 @@
+[project]
+name = "petri-dish"
+version = "0.1.0"
+description = "Petri Dish - AI agent simulation environment"
+readme = "README.md"
+authors = [
+    { name = "Evgeny Zotov", email = "gene.zotoff@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "ollama>=0.3.0",
+    "docker>=7.0.0",
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "pydantic-settings>=2.5.0",
+    "jinja2>=3.1.0",
+    "httpx>=0.27.0",
+    "pyyaml>=6.0.0",
+]
+
+[project.scripts]
+petri-dish = "petri_dish:main"
+
+[build-system]
+requires = ["uv_build>=0.10.10,<0.11.0"]
+build-backend = "uv_build"

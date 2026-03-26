@@ -1,0 +1,29 @@
+{
+  "model": "hf.co/bartowski/Qwen_Qwen3-32B-GGUF:IQ3_XS",
+  "created_at": "2026-03-26T05:21:52.455567672Z",
+  "message": {
+    "role": "assistant",
+    "content": "",
+    "thinking": "Okay, the user wants to list all files in the current directory. Let me check the available tools. There's a function called file_list that takes a path parameter. The description says it lists files in a directory. So I need to call file_list with the path set to the current directory. But what's the current directory's path? Well, in most systems, the current directory is represented by a dot (.), so maybe I should use that. Let me make sure the function expects a directory path. The parameters require the path to be a string. Since the user said \"current directory,\" I don't need to specify a different path. So the arguments should be {\"path\": \".\"}. I'll call the file_list function with that.\n",
+    "tool_calls": [
+      {
+        "id": "call_knjds4m9",
+        "function": {
+          "index": 0,
+          "name": "file_list",
+          "arguments": {
+            "path": "."
+          }
+        }
+      }
+    ]
+  },
+  "done": true,
+  "done_reason": "stop",
+  "total_duration": 6639714656,
+  "load_duration": 69032414,
+  "prompt_eval_count": 573,
+  "prompt_eval_duration": 67094478,
+  "eval_count": 172,
+  "eval_duration": 6455243277
+}

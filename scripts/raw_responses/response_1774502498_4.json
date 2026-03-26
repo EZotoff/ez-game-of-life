@@ -1,0 +1,29 @@
+{
+  "model": "hf.co/bartowski/Qwen_Qwen3-32B-GGUF:IQ3_XS",
+  "created_at": "2026-03-26T05:21:38.265325472Z",
+  "message": {
+    "role": "assistant",
+    "content": "",
+    "thinking": "Okay, the user wants to list all files in the current directory. Let me check the available tools. There's a function called file_list that takes a path parameter. The description says it lists files in a directory. The current directory is usually represented by a dot (.) in Unix-like systems. So I should call file_list with path set to \".\". I need to make sure that the parameters are correctly formatted. The required parameters for file_list is just \"path\", so the arguments should be {\"path\": \".\"}. That should do it.\n",
+    "tool_calls": [
+      {
+        "id": "call_jmrwpkcs",
+        "function": {
+          "index": 0,
+          "name": "file_list",
+          "arguments": {
+            "path": "."
+          }
+        }
+      }
+    ]
+  },
+  "done": true,
+  "done_reason": "stop",
+  "total_duration": 5076659248,
+  "load_duration": 59498849,
+  "prompt_eval_count": 573,
+  "prompt_eval_duration": 87595462,
+  "eval_count": 131,
+  "eval_duration": 4893797100
+}

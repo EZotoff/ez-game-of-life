@@ -1,0 +1,29 @@
+{
+  "model": "hf.co/bartowski/Qwen_Qwen3-32B-GGUF:IQ3_XS",
+  "created_at": "2026-03-26T05:28:41.915470632Z",
+  "message": {
+    "role": "assistant",
+    "content": "",
+    "thinking": "Okay, the user wants me to run the 'ls -la' command. Let me check the available tools. There's a shell_exec function that takes a command parameter. The required parameter is 'command', and the description says it's for the shell command to execute. So I need to call shell_exec with the command 'ls -la'. I should make sure the arguments are correctly formatted as JSON. Let me structure the tool call accordingly.\n",
+    "tool_calls": [
+      {
+        "id": "call_309zn5w0",
+        "function": {
+          "index": 0,
+          "name": "shell_exec",
+          "arguments": {
+            "command": "ls -la"
+          }
+        }
+      }
+    ]
+  },
+  "done": true,
+  "done_reason": "stop",
+  "total_duration": 4087809988,
+  "load_duration": 60769627,
+  "prompt_eval_count": 269,
+  "prompt_eval_duration": 62900182,
+  "eval_count": 114,
+  "eval_duration": 3931714971
+}

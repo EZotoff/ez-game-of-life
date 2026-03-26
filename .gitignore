@@ -6,6 +6,12 @@ __pycache__/
 dist/
 build/
 *.egg
+.pytest_cache/
+.coverage
+htmlcov/
+*.so
+.mypy_cache/
+.ruff_cache/
 
 # Environments
 .env
