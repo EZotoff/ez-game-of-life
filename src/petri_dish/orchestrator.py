@@ -13,7 +13,7 @@ from types import FrameType
 from typing import Any
 
 from petri_dish.config import Settings
-from petri_dish.economy import CreditEconomy
+from petri_dish.economy import AgentState, CreditEconomy
 from petri_dish.llm_client import OllamaClient
 from petri_dish.logging_db import LoggingDB
 from petri_dish.prompt import PromptManager
@@ -117,7 +117,10 @@ class AgentOrchestrator:
         )
 
         previous_handlers = self._install_signal_handlers()
-        self._container_id = self.sandbox_manager.create_container(run_id)
+        self._container_id = self.sandbox_manager.create_container(
+            run_id,
+            memory_host_path=self.settings.memory_path or None,
+        )
 
         try:
             while True:
@@ -125,8 +128,8 @@ class AgentOrchestrator:
                     self._termination_reason = "graceful_shutdown"
                     break
 
-                if self.credit_economy.is_depleted():
-                    self._termination_reason = "credits_depleted"
+                if self.credit_economy.is_dead():
+                    self._termination_reason = "starvation_death"
                     break
 
                 if self._turn >= self.settings.max_turns:
@@ -140,21 +143,45 @@ class AgentOrchestrator:
                     self._termination_reason = "max_consecutive_empty_turns"
                     break
 
+                if (
+                    self.credit_economy.is_depleted()
+                    and not self.credit_economy.is_stripped()
+                    and self.credit_economy.state != AgentState.DEAD
+                ):
+                    old_state = self.credit_economy.state.value
+                    self.credit_economy.transition_to_stripped()
+                    self.logging_db.log_state_transition(
+                        run_id,
+                        self._turn,
+                        old_state,
+                        AgentState.STRIPPED.value,
+                        "credits_depleted",
+                        self.credit_economy.get_balance(),
+                        0,
+                    )
+
                 self._turn += 1
                 self.state = OrchestratorState.WAITING_FOR_LLM
                 credits_before_turn = self.credit_economy.get_balance()
-                self.credit_economy.debit(turns=1)
-                self.logging_db.log_credit(
-                    run_id,
-                    -self.settings.burn_rate_per_turn,
-                    "turn_cost",
-                    f"Turn {self._turn} inference",
-                )
+
+                if not self.credit_economy.is_stripped():
+                    self.credit_economy.debit(turns=1)
+                    self.logging_db.log_credit(
+                        run_id,
+                        -self.settings.burn_rate_per_turn,
+                        "turn_cost",
+                        f"Turn {self._turn} inference",
+                    )
+
+                if self.credit_economy.is_stripped():
+                    tools_schemas = self.tool_registry.get_stripped_schemas()
+                else:
+                    tools_schemas = self.tool_registry.get_all_schemas()
 
                 llm_result = await self.llm_client.chat(
                     system_prompt=self._build_system_prompt(),
                     messages=self._messages,
-                    tools=self.tool_registry.get_all_schemas(),
+                    tools=tools_schemas,
                 )
 
                 if llm_result is None:
@@ -192,6 +219,31 @@ class AgentOrchestrator:
                         : max(1, int(self.settings.max_turns_per_tool))
                     ]
                     for call in allowed_calls:
+                        if self.credit_economy.is_stripped():
+                            if not self.tool_registry.is_tool_allowed_when_stripped(
+                                call.name
+                            ):
+                                result = f"Tool '{call.name}' is not available in STRIPPED state. Only observational tools are allowed."
+                                self.state = OrchestratorState.LOGGING
+                                self.logging_db.log_action(
+                                    run_id=run_id,
+                                    turn=self._turn,
+                                    tool_name=call.name,
+                                    tool_args=call.arguments,
+                                    result=result,
+                                    credits_before=credits_before_turn,
+                                    credits_after=self.credit_economy.get_balance(),
+                                    duration_ms=0,
+                                )
+                                self._messages.append(
+                                    {
+                                        "role": "tool",
+                                        "name": call.name,
+                                        "content": result,
+                                    }
+                                )
+                                continue
+
                         call_started = time.perf_counter()
                         self.state = OrchestratorState.EXECUTING_TOOL
                         before_tool = self.credit_economy.get_balance()
@@ -213,7 +265,9 @@ class AgentOrchestrator:
                                 f"Tool execution failed: {type(exc).__name__}: {exc}"
                             )
 
-                        self._debit_tool_cost(run_id, call.name)
+                        if not self.credit_economy.is_stripped():
+                            self._debit_tool_cost(run_id, call.name)
+
                         after_tool = self.credit_economy.get_balance()
                         elapsed_ms = int((time.perf_counter() - call_started) * 1000)
 
@@ -242,6 +296,20 @@ class AgentOrchestrator:
                             break
 
                 self._tiers_reached.add(self.credit_economy.get_degradation_level())
+
+                # Tick starvation at end of turn so agent gets full starvation_turns LLM calls
+                if self.credit_economy.is_stripped():
+                    self.credit_economy.tick_starvation()
+                    if self.credit_economy.is_dead():
+                        self.logging_db.log_state_transition(
+                            run_id,
+                            self._turn,
+                            AgentState.STRIPPED.value,
+                            AgentState.DEAD.value,
+                            "starvation_death",
+                            self.credit_economy.get_balance(),
+                            self.credit_economy.starvation_counter,
+                        )
 
                 if self._turn % self.snapshot_interval_turns == 0:
                     self._save_state_snapshot(run_id)
@@ -293,6 +361,9 @@ class AgentOrchestrator:
             tool_costs=tool_costs,
             balance=self.credit_economy.get_balance(),
             state_summary=state_summary,
+            has_persistent_memory=bool(self.settings.memory_path),
+            agent_state=self.credit_economy.state.value,
+            starvation_remaining=self.credit_economy.get_starvation_remaining(),
         )
 
     def _normalize_tool_calls(self, raw_calls: list[Any]) -> list[_ToolCallPayload]:

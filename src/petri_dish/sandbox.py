@@ -73,11 +73,16 @@ class SandboxManager:
     #  Container lifecycle
     # ------------------------------------------------------------------ #
 
-    def create_container(self, run_id: str) -> str:
+    def create_container(
+        self, run_id: str, *, memory_host_path: str | None = None
+    ) -> str:
         """Create an isolated Docker container for a simulation run.
 
         Args:
             run_id: Unique identifier for the run.
+            memory_host_path: Optional host directory to bind-mount as
+                /agent/memory/ inside the container. Contents persist across
+                runs. Created automatically if it doesn't exist.
 
         Returns:
             Container ID string.
@@ -91,6 +96,18 @@ class SandboxManager:
         except NotFound:
             pass
 
+        volumes: dict[str, dict[str, str]] = {}
+        if memory_host_path:
+            from pathlib import Path
+
+            mem_dir = Path(memory_host_path)
+            mem_dir.mkdir(parents=True, exist_ok=True)
+            volumes[str(mem_dir.resolve())] = {
+                "bind": "/agent/memory",
+                "mode": "rw",
+            }
+            logger.info("Persistent memory mounted: %s -> /agent/memory", mem_dir)
+
         try:
             container: Container = self._client.containers.run(
                 image=settings.docker_image,
@@ -101,6 +118,7 @@ class SandboxManager:
                 network_disabled=True,
                 mem_limit=settings.docker_mem_limit,
                 cpu_quota=settings.docker_cpu_quota,
+                volumes=volumes or None,
                 command=["sleep", "infinity"],
                 labels={"petri-dish": "sandbox", "run-id": run_id},
             )

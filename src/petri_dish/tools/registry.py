@@ -36,6 +36,7 @@ class ToolDefinition:
         handler: Callable that implements the tool logic.
         host_side: If True, runs on host (not in container).
         cost: Credit cost per invocation (loaded from config).
+        free_when_stripped: If True, tool is available even when agent wallet is ≤ 0.
     """
 
     name: str
@@ -44,6 +45,7 @@ class ToolDefinition:
     handler: Optional[Callable[..., str]] = None
     host_side: bool = False
     cost: float = 0.0
+    free_when_stripped: bool = False
 
     def to_ollama_schema(self) -> Dict[str, Any]:
         """Generate OpenAI function calling format schema for Ollama.
@@ -205,6 +207,33 @@ class ToolRegistry:
             return error_msg
 
         return str(result)
+
+    def get_stripped_schemas(self) -> List[Dict[str, Any]]:
+        """Generate Ollama schemas for tools available when agent is stripped.
+
+        Returns schemas for tools where free_when_stripped is True.
+        """
+        return [
+            tool.to_ollama_schema()
+            for tool in self._tools.values()
+            if tool.free_when_stripped
+        ]
+
+    def is_tool_allowed_when_stripped(self, name: str) -> bool:
+        """Check if a tool is available in stripped state.
+
+        Args:
+            name: Tool name to check.
+
+        Returns:
+            True if the tool has free_when_stripped=True.
+        """
+        tool = self._tools.get(name)
+        return tool is not None and tool.free_when_stripped
+
+    def get_stripped_tool_names(self) -> List[str]:
+        """Return names of tools available in stripped state."""
+        return [name for name, tool in self._tools.items() if tool.free_when_stripped]
 
     def __len__(self) -> int:
         return len(self._tools)

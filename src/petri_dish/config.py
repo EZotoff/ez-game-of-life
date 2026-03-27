@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     # Null Model Configuration
     null_model_type: Literal["random", "constant", "none"] = "random"
 
+    # Death System
+    starvation_turns: int = 7
+
+    # Persistent Memory
+    memory_path: str = ".sisyphus/memory"
+
     # Tool Costs
     tool_costs: Dict[str, float] = {
         "file_read": 0.01,

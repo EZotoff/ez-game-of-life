@@ -40,8 +40,14 @@ credit_rewards:
   easy: 0.3
   hard: 2.0
 
+# Death System
+starvation_turns: 7
+
 # Null Model Configuration
 null_model_type: random
+
+# Persistent Memory (survives across runs)
+memory_path: .sisyphus/memory
 
 # Tool Costs
 tool_costs:

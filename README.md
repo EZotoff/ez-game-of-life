@@ -35,7 +35,7 @@ Every run is unique. The agent might become methodical, systematic, creative —
 
 This isn't a demo of AI capabilities. It's a **survival drama**.
 
-The agent is alone. The clock is always running. There are no second chances — only runs that end in discovery or depletion. You're not evaluating performance; you're watching **adaptation under pressure**.
+The agent is alone. The clock is always running. When credits run out, the agent gets a brief window to observe and negotiate — but no one may be listening. You're not evaluating performance; you're watching **adaptation under pressure**.
 
 Some runs feel like watching a mouse solve a maze. Others feel like watching a child figure out a puzzle. A few feel like watching something genuinely alien reason its way through an opaque world.
 
@@ -307,7 +307,20 @@ The agent has exactly **8 tools** at its disposal:
 - **Burn rate**: 0.1 credits per turn (inference cost)
 - **Tool costs**: 0.01–0.10 credits per use
 - **Earning**: Process files correctly → earn 0.3 (easy) to 2.0 (hard) credits
-- **Termination**: Balance hits zero → experiment ends
+- **Two-phase death**: Balance hits zero → agent enters **STRIPPED** state
+  - Only observational tools available (`check_balance`, `get_env_info`, `file_list`)
+  - A **7-turn starvation timer** begins — the agent can observe and communicate but cannot act
+  - When the timer expires → the agent dies. No second chances.
+
+## Persistent Memory
+
+Agents can retain knowledge across runs. A host directory is bind-mounted into the container at `/agent/memory/`. Anything the agent writes there survives container destruction. The agent's system prompt tells it about this capability — whether it figures out how to use it strategically is up to it.
+
+Configure via `config.yaml`:
+
+```yaml
+memory_path: .sisyphus/memory  # Host directory mounted at /agent/memory/
+```
 
 ## File Ecology
 
@@ -332,6 +345,8 @@ max_turns: 1000               # Maximum experiment length
 model_name: qwen3:8b          # Ollama model
 economy_mode: visible         # Agent can check balance
 docker_mem_limit: 512m        # Container memory limit
+starvation_turns: 7           # Turns in STRIPPED state before death
+memory_path: .sisyphus/memory # Persistent memory (survives across runs)
 ```
 
 See [`config.yaml`](config.yaml) for the full parameter list.

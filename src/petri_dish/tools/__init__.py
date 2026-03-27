@@ -56,6 +56,7 @@ def _build_tool_definitions() -> list[ToolDefinition]:
                 ),
             ],
             handler=container_tools.file_list,
+            free_when_stripped=True,
         ),
         ToolDefinition(
             name="shell_exec",
@@ -82,6 +83,7 @@ def _build_tool_definitions() -> list[ToolDefinition]:
             parameters=[],
             handler=host_tools.check_balance,
             host_side=True,
+            free_when_stripped=True,
         ),
         ToolDefinition(
             name="http_request",
@@ -128,6 +130,7 @@ def _build_tool_definitions() -> list[ToolDefinition]:
             parameters=[],
             handler=agent_tools.get_env_info,
             host_side=True,
+            free_when_stripped=True,
         ),
     ]
 

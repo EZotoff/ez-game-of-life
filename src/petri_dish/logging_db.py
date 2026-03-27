@@ -131,6 +131,22 @@ class LoggingDB:
             )
         """)
 
+        # Create state_transitions table - tracks agent lifecycle changes
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS state_transitions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                turn INTEGER NOT NULL,
+                from_state TEXT NOT NULL,
+                to_state TEXT NOT NULL,
+                reason TEXT,
+                balance REAL,
+                starvation_counter INTEGER,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+            )
+        """)
+
         # Create indexes for performance
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_actions_run_id ON actions(run_id)"
@@ -145,6 +161,9 @@ class LoggingDB:
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_credits_timestamp ON credit_transactions(timestamp)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_state_transitions_run_id ON state_transitions(run_id)"
         )
 
         conn.commit()
@@ -301,6 +320,27 @@ class LoggingDB:
             VALUES (?, ?, ?, ?, ?)
             """,
             (run_id, amount, tx_type, reason, balance_after),
+        )
+        conn.commit()
+
+    def log_state_transition(
+        self,
+        run_id: str,
+        turn: int,
+        from_state: str,
+        to_state: str,
+        reason: Optional[str] = None,
+        balance: Optional[float] = None,
+        starvation_counter: Optional[int] = None,
+    ) -> None:
+        conn = self._ensure_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO state_transitions (run_id, turn, from_state, to_state, reason, balance, starvation_counter)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (run_id, turn, from_state, to_state, reason, balance, starvation_counter),
         )
         conn.commit()
 

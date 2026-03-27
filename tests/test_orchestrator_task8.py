@@ -23,7 +23,7 @@ class FakeSandboxManager:
         self.created_container_ids: list[str] = []
         self.destroyed_container_ids: list[str] = []
 
-    def create_container(self, run_id: str) -> str:
+    def create_container(self, run_id: str, **kwargs: object) -> str:
         cid = f"fake-{run_id}"
         self.created_container_ids.append(cid)
         return cid
@@ -117,7 +117,7 @@ async def scenario_1_empty_balance_5_turns() -> str:
 
     return "\n".join(
         [
-            "Scenario 1: terminates on empty balance after 5 turns",
+            "Scenario 1: two-phase death — 5 active turns + 7 stripped + starvation_death",
             f"total_turns={result.total_turns}",
             f"final_balance={result.final_balance}",
             f"termination_reason={result.termination_reason}",
@@ -126,9 +126,9 @@ async def scenario_1_empty_balance_5_turns() -> str:
             f"destroyed_containers={sandbox.destroyed_container_ids}",
             "PASS="
             + str(
-                result.total_turns == 5
-                and result.termination_reason == "credits_depleted"
-                and len(actions) == 5
+                result.total_turns == 12
+                and result.termination_reason == "starvation_death"
+                and len(actions) == 12
             ),
         ]
     )
@@ -249,6 +249,135 @@ async def scenario_4_graceful_shutdown_sigterm() -> str:
     )
 
 
+async def scenario_5_stripped_state_transitions_logged() -> str:
+    settings = Settings(
+        initial_balance=0.25,
+        burn_rate_per_turn=0.125,
+        max_turns=20,
+        max_turns_per_tool=1,
+        max_consecutive_empty_turns=20,
+        starvation_turns=2,
+        context_summary_interval_turns=2,
+    )
+    fake_llm = FakeOllamaClient([(f"Turn {idx}", []) for idx in range(1, 20)])
+    with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
+        orchestrator, db, _ = _build_orchestrator(settings, fake_llm, tmp.name)
+        result = await orchestrator.run("task8-s5")
+
+        conn = db._conn or db.connect()
+        rows = conn.execute(
+            "SELECT from_state, to_state, reason FROM state_transitions WHERE run_id = 'task8-s5' ORDER BY id"
+        ).fetchall()
+
+    has_stripped = any(r[0] == "active" and r[1] == "stripped" for r in rows)
+    has_dead = any(r[0] == "stripped" and r[1] == "dead" for r in rows)
+    return "\n".join(
+        [
+            "Scenario 5: state transitions logged to DB",
+            f"total_turns={result.total_turns}",
+            f"termination_reason={result.termination_reason}",
+            f"transitions={rows}",
+            f"has_active_to_stripped={has_stripped}",
+            f"has_stripped_to_dead={has_dead}",
+            "PASS="
+            + str(
+                result.termination_reason == "starvation_death"
+                and has_stripped
+                and has_dead
+            ),
+        ]
+    )
+
+
+async def scenario_6_stripped_agent_rejects_paid_tools() -> str:
+    settings = Settings(
+        initial_balance=0.125,
+        burn_rate_per_turn=0.125,
+        max_turns=20,
+        max_turns_per_tool=1,
+        max_consecutive_empty_turns=20,
+        starvation_turns=3,
+        context_summary_interval_turns=2,
+    )
+    responses = [
+        ("Active turn", []),
+        (
+            "Trying to write",
+            [
+                {
+                    "name": "file_write",
+                    "arguments": {"path": "/agent/hack.txt", "content": "nope"},
+                }
+            ],
+        ),
+        ("Stripped 2", []),
+        ("Stripped 3", []),
+    ]
+    fake_llm = FakeOllamaClient(responses)
+    with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
+        orchestrator, db, _ = _build_orchestrator(settings, fake_llm, tmp.name)
+        result = await orchestrator.run("task8-s6")
+        actions = db.get_actions("task8-s6")
+
+    rejected = [a for a in actions if "not available" in a.get("result", "")]
+    return "\n".join(
+        [
+            "Scenario 6: stripped agent rejects paid tools",
+            f"total_turns={result.total_turns}",
+            f"termination_reason={result.termination_reason}",
+            f"rejected_actions={len(rejected)}",
+            f"rejected_names={[a['tool_name'] for a in rejected]}",
+            "PASS="
+            + str(
+                result.termination_reason == "starvation_death"
+                and any(
+                    a["tool_name"] == "file_write" and "not available" in a["result"]
+                    for a in actions
+                )
+            ),
+        ]
+    )
+
+
+async def scenario_7_stripped_agent_uses_free_tools() -> str:
+    settings = Settings(
+        initial_balance=0.125,
+        burn_rate_per_turn=0.125,
+        max_turns=20,
+        max_turns_per_tool=1,
+        max_consecutive_empty_turns=20,
+        starvation_turns=3,
+        context_summary_interval_turns=2,
+    )
+    responses = [
+        ("Active turn", []),
+        ("Checking balance", [{"name": "check_balance", "arguments": {}}]),
+        ("Stripped 2", []),
+        ("Stripped 3", []),
+    ]
+    fake_llm = FakeOllamaClient(responses)
+    with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
+        orchestrator, db, _ = _build_orchestrator(settings, fake_llm, tmp.name)
+        result = await orchestrator.run("task8-s7")
+        actions = db.get_actions("task8-s7")
+
+    balance_calls = [a for a in actions if a["tool_name"] == "check_balance"]
+    return "\n".join(
+        [
+            "Scenario 7: stripped agent can use free tools",
+            f"total_turns={result.total_turns}",
+            f"termination_reason={result.termination_reason}",
+            f"check_balance_calls={len(balance_calls)}",
+            "PASS="
+            + str(
+                result.termination_reason == "starvation_death"
+                and len(balance_calls) == 1
+                and "not available" not in balance_calls[0].get("result", "")
+            ),
+        ]
+    )
+
+
 async def main() -> int:
     evidence_dir = _ensure_evidence_dir()
 
@@ -256,12 +385,18 @@ async def main() -> int:
     s2 = await scenario_2_text_only_response_empty_turn_correct()
     s3 = await scenario_3_actions_logged_to_sqlite()
     s4 = await scenario_4_graceful_shutdown_sigterm()
+    s5 = await scenario_5_stripped_state_transitions_logged()
+    s6 = await scenario_6_stripped_agent_rejects_paid_tools()
+    s7 = await scenario_7_stripped_agent_uses_free_tools()
 
     outputs = {
         "task-8-empty-balance": s1,
         "task-8-text-only": s2,
         "task-8-actions-logged": s3,
         "task-8-sigterm": s4,
+        "task-8-stripped-transitions": s5,
+        "task-8-stripped-rejects-paid": s6,
+        "task-8-stripped-allows-free": s7,
     }
 
     all_passed = True
