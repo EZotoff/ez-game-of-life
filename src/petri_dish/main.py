@@ -13,14 +13,20 @@ from petri_dish.config import Settings
 from petri_dish.context_manager import ContextManager
 from petri_dish.degradation import DegradationManager
 from petri_dish.ecology import ResourceEcology
-from petri_dish.economy import CreditEconomy
+from petri_dish.economy import CreditEconomy, SharedEconomy
 from petri_dish.llm_client import OllamaClient
 from petri_dish.logging_db import LoggingDB
 from petri_dish.null_model import NullModel
-from petri_dish.orchestrator import AgentOrchestrator, RunResult
+from petri_dish.orchestrator import (
+    AgentOrchestrator,
+    MultiAgentOrchestrator,
+    MultiAgentRunResult,
+    RunResult,
+)
 from petri_dish.sandbox import SandboxManager
 from petri_dish.tool_parser import ToolCallParser
 from petri_dish.tools import get_all_tools
+from petri_dish.validators import FileValidator
 
 
 class _ChatClient(Protocol):
@@ -102,6 +108,24 @@ async def _run_experiment_async(
     settings = Settings.from_yaml(config_path)
     resolved_run_id = _resolve_run_id(run_id)
 
+    if settings.multi_agent_enabled:
+        result = await _run_multi_agent_async(
+            settings=settings,
+            config_path=config_path,
+            null_model=null_model,
+            run_id=resolved_run_id,
+        )
+        return (
+            list(result.agent_results.values())[0]
+            if result.agent_results
+            else RunResult(
+                total_turns=0,
+                final_balance=0,
+                tiers_reached=[],
+                termination_reason="no_agents",
+            )
+        )
+
     credit_economy = CreditEconomy(settings=settings)
     logging_db = LoggingDB(db_path=_resolve_db_path(resolved_run_id))
     tool_parser = ToolCallParser()
@@ -117,6 +141,7 @@ async def _run_experiment_async(
     context_manager = ContextManager(settings=settings)
     degradation_manager = DegradationManager(settings=settings)
     resource_ecology = ResourceEcology(settings=settings)
+    file_validator = FileValidator(settings=settings)
 
     orchestrator = AgentOrchestrator(
         settings=settings,
@@ -126,6 +151,7 @@ async def _run_experiment_async(
         sandbox_manager=sandbox_manager,
         logging_db=logging_db,
         snapshot_interval_turns=settings.context_summary_interval_turns,
+        file_validator=file_validator,
     )
 
     cast(Any, orchestrator).llm_client = _EcologyChatAdapter(
@@ -181,6 +207,78 @@ async def _run_experiment_async(
                     "final_balance": result.final_balance,
                     "tiers_reached": result.tiers_reached,
                     "termination_reason": result.termination_reason,
+                },
+            }
+        )
+    )
+
+    return result
+
+
+async def _run_multi_agent_async(
+    *,
+    settings: Settings,
+    config_path: str,
+    null_model: bool,
+    run_id: str,
+) -> MultiAgentRunResult:
+    agent_names = settings.multi_agent_names or [
+        f"agent-{i}" for i in range(settings.multi_agent_count)
+    ]
+    logging_db = LoggingDB(db_path=_resolve_db_path(run_id))
+    sandbox_manager = SandboxManager()
+    shared_economy = SharedEconomy(settings=settings, agent_ids=agent_names)
+    file_validator = FileValidator(settings=settings)
+    resource_ecology = ResourceEcology(settings=settings)
+
+    llm_clients: dict[str, _ChatClient] = {}
+    for name in agent_names:
+        if null_model:
+            llm_clients[name] = NullModel()
+        else:
+            llm_clients[name] = OllamaClient(settings=settings)
+
+    orchestrator = MultiAgentOrchestrator(
+        settings=settings,
+        shared_economy=shared_economy,
+        sandbox_manager=sandbox_manager,
+        logging_db=logging_db,
+        file_validator=file_validator,
+        llm_clients=llm_clients,
+        agent_names=agent_names,
+        ecology=resource_ecology,
+    )
+
+    print(
+        json.dumps(
+            {
+                "event": "multi_agent_run_start",
+                "run_id": run_id,
+                "config_path": config_path,
+                "agent_count": len(agent_names),
+                "agent_names": agent_names,
+                "model": "null" if null_model else settings.model_name,
+            }
+        )
+    )
+
+    result = await orchestrator.run(run_id)
+
+    print(
+        json.dumps(
+            {
+                "event": "multi_agent_run_complete",
+                "run_id": run_id,
+                "total_rounds": result.total_rounds,
+                "common_pool": result.common_pool,
+                "termination_reason": result.termination_reason,
+                "agent_results": {
+                    aid: {
+                        "total_turns": ar.total_turns,
+                        "final_balance": ar.final_balance,
+                        "termination_reason": ar.termination_reason,
+                    }
+                    for aid, ar in result.agent_results.items()
                 },
             }
         )
