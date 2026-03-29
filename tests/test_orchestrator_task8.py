@@ -38,6 +38,12 @@ class FakeSandboxManager:
             "memory_limit_mb": 512.0,
         }
 
+    def exec_in_container(self, container_id: str, command: str) -> str:
+        return ""
+
+    def read_file(self, container_id: str, path: str) -> str:
+        return ""
+
 
 class FakeOllamaClient:
     def __init__(

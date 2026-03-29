@@ -135,12 +135,20 @@ class TestToolRegistryStripped:
     def test_get_stripped_schemas_returns_only_stripped_tools(self, registry):
         schemas = registry.get_stripped_schemas()
         names = {s["function"]["name"] for s in schemas}
-        assert names == {"check_balance", "get_env_info", "file_list"}
+        assert names == {
+            "check_balance",
+            "get_env_info",
+            "file_list",
+            "send_message",
+            "read_messages",
+        }
 
     def test_is_tool_allowed_when_stripped(self, registry):
         assert registry.is_tool_allowed_when_stripped("check_balance") is True
         assert registry.is_tool_allowed_when_stripped("get_env_info") is True
         assert registry.is_tool_allowed_when_stripped("file_list") is True
+        assert registry.is_tool_allowed_when_stripped("send_message") is True
+        assert registry.is_tool_allowed_when_stripped("read_messages") is True
 
     def test_non_stripped_tool_rejected(self, registry):
         assert registry.is_tool_allowed_when_stripped("file_write") is False
