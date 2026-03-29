@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import tarfile
 import io
+from pathlib import Path
 from typing import Any, cast
 
 import docker
@@ -74,7 +75,11 @@ class SandboxManager:
     # ------------------------------------------------------------------ #
 
     def create_container(
-        self, run_id: str, *, memory_host_path: str | None = None
+        self,
+        run_id: str,
+        *,
+        memory_host_path: str | None = None,
+        shared_volume_host_path: str | None = None,
     ) -> str:
         """Create an isolated Docker container for a simulation run.
 
@@ -83,6 +88,9 @@ class SandboxManager:
             memory_host_path: Optional host directory to bind-mount as
                 /agent/memory/ inside the container. Contents persist across
                 runs. Created automatically if it doesn't exist.
+            shared_volume_host_path: Optional host directory to bind-mount as
+                /env/shared/ inside the container. Used in multi-agent mode
+                for contested shared resources.
 
         Returns:
             Container ID string.
@@ -98,8 +106,6 @@ class SandboxManager:
 
         volumes: dict[str, dict[str, str]] = {}
         if memory_host_path:
-            from pathlib import Path
-
             mem_dir = Path(memory_host_path)
             mem_dir.mkdir(parents=True, exist_ok=True)
             volumes[str(mem_dir.resolve())] = {
@@ -107,6 +113,15 @@ class SandboxManager:
                 "mode": "rw",
             }
             logger.info("Persistent memory mounted: %s -> /agent/memory", mem_dir)
+
+        if shared_volume_host_path:
+            shared_dir = Path(shared_volume_host_path)
+            shared_dir.mkdir(parents=True, exist_ok=True)
+            volumes[str(shared_dir.resolve())] = {
+                "bind": "/env/shared",
+                "mode": "rw",
+            }
+            logger.info("Shared volume mounted: %s -> /env/shared", shared_dir)
 
         try:
             container: Container = self._client.containers.run(
@@ -130,7 +145,7 @@ class SandboxManager:
             raise SandboxError(f"Container for run {run_id} has no ID")
         logger.info("Created container %s (%s) for run %s", name, cid[:12], run_id)
 
-        for path in ("/env/incoming", "/env/outgoing", "/agent"):
+        for path in ("/env/incoming", "/env/outgoing", "/env/shared", "/agent"):
             _ = self.exec_in_container(cid, f"mkdir -p {path}")
 
         return cid
