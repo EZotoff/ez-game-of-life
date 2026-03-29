@@ -96,6 +96,7 @@ class LoggingDB:
                 credits_before REAL NOT NULL,
                 credits_after REAL NOT NULL,
                 duration_ms INTEGER NOT NULL,
+                agent_id TEXT DEFAULT NULL,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
             )
@@ -126,6 +127,7 @@ class LoggingDB:
                 type TEXT NOT NULL,
                 reason TEXT,
                 balance_after REAL NOT NULL,
+                agent_id TEXT DEFAULT NULL,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
             )
@@ -142,6 +144,37 @@ class LoggingDB:
                 reason TEXT,
                 balance REAL,
                 starvation_counter INTEGER,
+                agent_id TEXT DEFAULT NULL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+            )
+        """)
+
+        # Create messages table - inter-agent communication
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                sender_id TEXT NOT NULL,
+                recipient_id TEXT NOT NULL,
+                content TEXT NOT NULL,
+                round_num INTEGER NOT NULL,
+                turn INTEGER NOT NULL,
+                read INTEGER NOT NULL DEFAULT 0,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS event_ledger (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                round_num INTEGER NOT NULL,
+                agent_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                details TEXT,
+                credit_delta REAL DEFAULT 0,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
             )
@@ -164,6 +197,27 @@ class LoggingDB:
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_state_transitions_run_id ON state_transitions(run_id)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_actions_agent_id ON actions(agent_id)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_credits_agent_id ON credit_transactions(agent_id)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_state_transitions_agent_id ON state_transitions(agent_id)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_run_id ON messages(run_id)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_recipient ON messages(recipient_id, read)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_event_ledger_run_id ON event_ledger(run_id)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_event_ledger_agent ON event_ledger(agent_id)"
         )
 
         conn.commit()
@@ -194,6 +248,7 @@ class LoggingDB:
         credits_before: float,
         credits_after: float,
         duration_ms: int,
+        agent_id: Optional[str] = None,
     ) -> None:
         """
         Log a tool action.
@@ -207,6 +262,7 @@ class LoggingDB:
             credits_before: Credit balance before the action
             credits_after: Credit balance after the action
             duration_ms: Duration of the action in milliseconds
+            agent_id: Optional agent identifier for multi-agent runs
         """
         conn = self._ensure_connection()
         cursor = conn.cursor()
@@ -220,8 +276,8 @@ class LoggingDB:
         cursor.execute(
             """
             INSERT INTO actions 
-            (run_id, turn, tool_name, tool_args, result, credits_before, credits_after, duration_ms)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (run_id, turn, tool_name, tool_args, result, credits_before, credits_after, duration_ms, agent_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run_id,
@@ -232,6 +288,7 @@ class LoggingDB:
                 credits_before,
                 credits_after,
                 duration_ms,
+                agent_id,
             ),
         )
         conn.commit()
@@ -286,7 +343,12 @@ class LoggingDB:
         conn.commit()
 
     def log_credit(
-        self, run_id: str, amount: float, tx_type: str, reason: Optional[str] = None
+        self,
+        run_id: str,
+        amount: float,
+        tx_type: str,
+        reason: Optional[str] = None,
+        agent_id: Optional[str] = None,
     ) -> None:
         """
         Log a credit transaction.
@@ -296,6 +358,7 @@ class LoggingDB:
             amount: Amount of credits (positive for income, negative for expense)
             tx_type: Transaction type (e.g., 'file_processed', 'tool_cost', 'initial_balance')
             reason: Optional description of the transaction
+            agent_id: Optional agent identifier for multi-agent runs
         """
         # Get current balance after this transaction
         conn = self._ensure_connection()
@@ -316,10 +379,10 @@ class LoggingDB:
 
         cursor.execute(
             """
-            INSERT INTO credit_transactions (run_id, amount, type, reason, balance_after)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO credit_transactions (run_id, amount, type, reason, balance_after, agent_id)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (run_id, amount, tx_type, reason, balance_after),
+            (run_id, amount, tx_type, reason, balance_after, agent_id),
         )
         conn.commit()
 
@@ -332,15 +395,25 @@ class LoggingDB:
         reason: Optional[str] = None,
         balance: Optional[float] = None,
         starvation_counter: Optional[int] = None,
+        agent_id: Optional[str] = None,
     ) -> None:
         conn = self._ensure_connection()
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT INTO state_transitions (run_id, turn, from_state, to_state, reason, balance, starvation_counter)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO state_transitions (run_id, turn, from_state, to_state, reason, balance, starvation_counter, agent_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (run_id, turn, from_state, to_state, reason, balance, starvation_counter),
+            (
+                run_id,
+                turn,
+                from_state,
+                to_state,
+                reason,
+                balance,
+                starvation_counter,
+                agent_id,
+            ),
         )
         conn.commit()
 
@@ -360,7 +433,7 @@ class LoggingDB:
             """
             SELECT 
                 id, run_id, turn, tool_name, tool_args, result,
-                credits_before, credits_after, duration_ms, timestamp
+                credits_before, credits_after, duration_ms, agent_id, timestamp
             FROM actions 
             WHERE run_id = ? 
             ORDER BY turn, timestamp
@@ -393,7 +466,7 @@ class LoggingDB:
         cursor.execute(
             """
             SELECT 
-                timestamp, amount, type, reason, balance_after
+                timestamp, amount, type, reason, balance_after, agent_id
             FROM credit_transactions 
             WHERE run_id = ? 
             ORDER BY timestamp, id
@@ -490,6 +563,99 @@ class LoggingDB:
         stats.update(dict(row))
 
         return stats
+
+    def log_message(
+        self,
+        run_id: str,
+        sender_id: str,
+        recipient_id: str,
+        content: str,
+        round_num: int,
+        turn: int,
+    ) -> int:
+        conn = self._ensure_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO messages (run_id, sender_id, recipient_id, content, round_num, turn)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (run_id, sender_id, recipient_id, content, round_num, turn),
+        )
+        conn.commit()
+        return cursor.lastrowid or 0
+
+    def get_unread_messages(
+        self, run_id: str, recipient_id: str
+    ) -> List[Dict[str, Any]]:
+        conn = self._ensure_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, sender_id, content, round_num, turn, timestamp
+            FROM messages
+            WHERE run_id = ? AND recipient_id = ? AND read = 0
+            ORDER BY timestamp ASC
+            """,
+            (run_id, recipient_id),
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    def mark_messages_read(self, run_id: str, recipient_id: str) -> int:
+        conn = self._ensure_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE messages SET read = 1
+            WHERE run_id = ? AND recipient_id = ? AND read = 0
+            """,
+            (run_id, recipient_id),
+        )
+        conn.commit()
+        return cursor.rowcount
+
+    def log_event(
+        self,
+        run_id: str,
+        round_num: int,
+        agent_id: str,
+        event_type: str,
+        details: Optional[str] = None,
+        credit_delta: float = 0.0,
+    ) -> int:
+        conn = self._ensure_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO event_ledger
+                (run_id, round_num, agent_id, event_type, details, credit_delta)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (run_id, round_num, agent_id, event_type, details, credit_delta),
+        )
+        conn.commit()
+        return cursor.lastrowid or 0
+
+    def get_events(
+        self,
+        run_id: str,
+        agent_id: Optional[str] = None,
+        event_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        conn = self._ensure_connection()
+        cursor = conn.cursor()
+        query = "SELECT * FROM event_ledger WHERE run_id = ?"
+        params: list[Any] = [run_id]
+        if agent_id is not None:
+            query += " AND agent_id = ?"
+            params.append(agent_id)
+        if event_type is not None:
+            query += " AND event_type = ?"
+            params.append(event_type)
+        query += " ORDER BY id ASC"
+        cursor.execute(query, params)
+        return [dict(row) for row in cursor.fetchall()]
 
     @contextlib.contextmanager
     def read_only_connection(self):
