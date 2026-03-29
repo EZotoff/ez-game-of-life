@@ -59,3 +59,17 @@ tool_costs:
   http_request: 0.1
   self_modify: 0.02
   get_env_info: 0.0
+
+# Multi-Agent Configuration
+multi_agent_enabled: false
+multi_agent_count: 2
+multi_agent_models: []
+multi_agent_names: []
+multi_agent_shared_filesystem: true
+multi_agent_actions_per_turn: 4
+multi_agent_death_forfeit_pct: 0.6
+multi_agent_burn_pct: 0.3
+multi_agent_salvage_pct: 0.3
+multi_agent_reentry_fee: 20.0
+multi_agent_spectator_rounds: 2
+multi_agent_debt_garnish_pct: 0.5

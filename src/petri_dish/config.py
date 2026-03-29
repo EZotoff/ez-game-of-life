@@ -1,6 +1,6 @@
 """Configuration management for Petri Dish using Pydantic Settings."""
 
-from typing import Dict, Literal
+from typing import Dict, List, Literal, Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import yaml
 from pathlib import Path
@@ -68,6 +68,20 @@ class Settings(BaseSettings):
         "get_env_info": 0.0,
     }
 
+    # Multi-Agent Configuration
+    multi_agent_enabled: bool = False
+    multi_agent_count: int = 2
+    multi_agent_models: List[str] = []
+    multi_agent_names: List[str] = []
+    multi_agent_shared_filesystem: bool = True
+    multi_agent_actions_per_turn: int = 4
+    multi_agent_death_forfeit_pct: float = 0.6
+    multi_agent_burn_pct: float = 0.3
+    multi_agent_salvage_pct: float = 0.3
+    multi_agent_reentry_fee: float = 20.0
+    multi_agent_spectator_rounds: int = 2
+    multi_agent_debt_garnish_pct: float = 0.5
+
     @classmethod
     def from_yaml(cls, yaml_path: str = "config.yaml") -> "Settings":
         """Load settings from a YAML file."""
@@ -94,6 +108,11 @@ class Settings(BaseSettings):
             if "tool_costs" in yaml_data:
                 if not isinstance(yaml_data["tool_costs"], dict):
                     yaml_data["tool_costs"] = {}
+
+            # Ensure list fields are lists
+            for key in ("multi_agent_models", "multi_agent_names"):
+                if key in yaml_data and not isinstance(yaml_data[key], list):
+                    yaml_data[key] = []
 
         return cls(**yaml_data) if yaml_data else cls()
 
