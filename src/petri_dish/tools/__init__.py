@@ -1,18 +1,18 @@
 """Petri Dish tool system.
 
 Provides get_all_tools() to build a fully-wired ToolRegistry
-with all 8 agent tools registered.
+with all 10 agent tools registered (8 base + 2 communication).
 """
 
 from typing import Optional
 
 from petri_dish.config import Settings
 from petri_dish.tools.registry import ToolDefinition, ToolParameter, ToolRegistry
-from petri_dish.tools import container_tools, host_tools, agent_tools
+from petri_dish.tools import container_tools, host_tools, agent_tools, comm_tools
 
 
 def _build_tool_definitions() -> list[ToolDefinition]:
-    """Build the 8 tool definitions with their schemas and handlers."""
+    """Build the 10 tool definitions with their schemas and handlers."""
     return [
         ToolDefinition(
             name="file_read",
@@ -132,11 +132,38 @@ def _build_tool_definitions() -> list[ToolDefinition]:
             host_side=True,
             free_when_stripped=True,
         ),
+        ToolDefinition(
+            name="send_message",
+            description="Send a text message to another agent in the environment.",
+            parameters=[
+                ToolParameter(
+                    name="recipient",
+                    type="string",
+                    description="Agent ID of the recipient",
+                ),
+                ToolParameter(
+                    name="content",
+                    type="string",
+                    description="Message content to send",
+                ),
+            ],
+            handler=comm_tools.send_message,
+            host_side=True,
+            free_when_stripped=True,
+        ),
+        ToolDefinition(
+            name="read_messages",
+            description="Read all unread messages addressed to you. Messages are consumed on read.",
+            parameters=[],
+            handler=comm_tools.read_messages,
+            host_side=True,
+            free_when_stripped=True,
+        ),
     ]
 
 
 def get_all_tools(settings: Optional[Settings] = None) -> ToolRegistry:
-    """Build and return a ToolRegistry with all 8 tools registered.
+    """Build and return a ToolRegistry with all 10 tools registered.
 
     Args:
         settings: Optional Settings instance. If None, loads from config.yaml.
