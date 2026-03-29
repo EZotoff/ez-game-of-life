@@ -177,3 +177,153 @@ class CreditEconomy:
 
     def get_starvation_remaining(self) -> int:
         return max(0, self.starvation_turns - self.starvation_counter)
+
+
+class SharedEconomy:
+    """Multi-agent economy with common pool and per-agent wallets.
+
+    Manages N CreditEconomy instances, a shared common pool for
+    salvage/re-entry, debt garnishing on earnings, and spectator
+    cooldown after death.
+    """
+
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        agent_ids: list[str] | None = None,
+    ) -> None:
+        if settings is None:
+            settings = Settings.from_yaml()
+
+        self.settings = settings
+        self.common_pool: float = 0.0
+        self.agent_economies: dict[str, CreditEconomy] = {}
+        self.agent_debt: dict[str, float] = {}
+        self.spectator_counters: dict[str, int] = {}
+
+        ids = agent_ids or [f"agent-{i}" for i in range(settings.multi_agent_count)]
+        for agent_id in ids:
+            self.agent_economies[agent_id] = CreditEconomy(settings)
+            self.agent_debt[agent_id] = 0.0
+            self.spectator_counters[agent_id] = 0
+
+    def debit(self, agent_id: str, turns: int = 1) -> float:
+        return self.agent_economies[agent_id].debit(turns)
+
+    def credit(self, agent_id: str, amount: float) -> float:
+        economy = self.agent_economies[agent_id]
+        if amount > 0 and self.agent_debt.get(agent_id, 0) > 0:
+            garnish = min(
+                self.agent_debt[agent_id],
+                amount * self.settings.multi_agent_debt_garnish_pct,
+            )
+            self.agent_debt[agent_id] -= garnish
+            self.common_pool += garnish
+            amount -= garnish
+        return economy.credit(amount)
+
+    def handle_death(self, agent_id: str) -> float:
+        economy = self.agent_economies[agent_id]
+        balance = economy.get_balance()
+        burn = balance * self.settings.multi_agent_burn_pct
+        salvage = balance * self.settings.multi_agent_salvage_pct
+
+        economy.credit(-(burn + salvage))
+        self.common_pool += salvage
+
+        economy.state = AgentState.DEAD
+        economy.starvation_counter = 0
+        self.spectator_counters[agent_id] = 0
+        logger.info(
+            "DEATH: %s forfeited %.2f (burned=%.2f, salvage=%.2f)",
+            agent_id,
+            burn + salvage,
+            burn,
+            salvage,
+        )
+        return salvage
+
+    def tick_spectator(self, agent_id: str) -> bool:
+        if not self.agent_economies[agent_id].is_dead():
+            return False
+        self.spectator_counters[agent_id] += 1
+        cooldown = self.settings.multi_agent_spectator_rounds
+        logger.info(
+            "SPECTATOR: %s tick %d/%d",
+            agent_id,
+            self.spectator_counters[agent_id],
+            cooldown,
+        )
+        return self.spectator_counters[agent_id] >= cooldown
+
+    def reentry(self, agent_id: str) -> bool:
+        economy = self.agent_economies[agent_id]
+        if not economy.is_dead():
+            return False
+        cooldown = self.settings.multi_agent_spectator_rounds
+        if self.spectator_counters.get(agent_id, 0) < cooldown:
+            return False
+        fee = self.settings.multi_agent_reentry_fee
+        if self.common_pool < fee:
+            return False
+        self.common_pool -= fee
+        economy.credit(fee)
+        economy.state = AgentState.ACTIVE
+        economy.starvation_counter = 0
+        self.agent_debt[agent_id] = fee
+        self.spectator_counters[agent_id] = 0
+        logger.info(
+            "REENTRY: %s paid %.2f from common pool, debt=%.2f",
+            agent_id,
+            fee,
+            self.agent_debt[agent_id],
+        )
+        return True
+
+    def get_agent_balance(self, agent_id: str) -> float:
+        return self.agent_economies[agent_id].get_balance()
+
+    def get_agent_state(self, agent_id: str) -> AgentState:
+        return self.agent_economies[agent_id].state
+
+    def get_common_pool(self) -> float:
+        return self.common_pool
+
+    def get_agent_ids(self) -> list[str]:
+        return list(self.agent_economies.keys())
+
+    def get_agent_economy(self, agent_id: str) -> CreditEconomy:
+        return self.agent_economies[agent_id]
+
+    def get_agent_debt(self, agent_id: str) -> float:
+        return self.agent_debt.get(agent_id, 0.0)
+
+    def is_agent_stripped(self, agent_id: str) -> bool:
+        return self.agent_economies[agent_id].is_stripped()
+
+    def is_agent_dead(self, agent_id: str) -> bool:
+        return self.agent_economies[agent_id].is_dead()
+
+    def transition_agent_to_stripped(self, agent_id: str) -> bool:
+        return self.agent_economies[agent_id].transition_to_stripped()
+
+    def tick_agent_starvation(self, agent_id: str) -> AgentState:
+        return self.agent_economies[agent_id].tick_starvation()
+
+    def get_agent_starvation_remaining(self, agent_id: str) -> int:
+        return self.agent_economies[agent_id].get_starvation_remaining()
+
+    def get_living_agents(self) -> list[str]:
+        return [aid for aid, econ in self.agent_economies.items() if not econ.is_dead()]
+
+    def get_agent_summaries(self) -> list[dict]:
+        return [
+            {
+                "agent_id": aid,
+                "balance": econ.get_balance(),
+                "state": econ.state.value,
+                "degradation": econ.get_degradation_level(),
+                "starvation_remaining": econ.get_starvation_remaining(),
+            }
+            for aid, econ in self.agent_economies.items()
+        ]
