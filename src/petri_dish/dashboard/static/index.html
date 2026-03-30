@@ -23,19 +23,15 @@
     </script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        .custom-scrollbar::-webkit-scrollbar {
-            width: 8px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-            background: #0F172A;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-            background: #334155;
-            border-radius: 4px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-            background: #475569;
-        }
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #0F172A; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #475569; }
+        
+        details > summary { list-style: none; }
+        details > summary::-webkit-details-marker { display: none; }
+        details > summary::after { content: '+'; float: right; }
+        details[open] > summary::after { content: '-'; }
     </style>
 </head>
 <body class="bg-slate-950 text-slate-300 h-screen overflow-hidden flex flex-col font-sans">
@@ -50,13 +46,15 @@
             <select id="run-selector" class="bg-slate-800 border border-slate-700 text-sm rounded-md px-3 py-1.5 focus:outline-none focus:border-indigo-500 text-slate-200 min-w-[200px]">
                 <option value="">Loading runs...</option>
             </select>
-            <div class="text-sm font-medium bg-slate-800 px-4 py-1.5 rounded-md border border-slate-700">
-                Balance: <span id="current-balance" class="text-emerald-400 font-mono text-lg">0.00</span> 
+            <div id="balance-container" class="flex gap-2">
+                <div class="text-sm font-medium bg-slate-800 px-4 py-1.5 rounded-md border border-slate-700">
+                    Balance: <span id="current-balance" class="text-emerald-400 font-mono text-lg">0.00</span> 
+                </div>
             </div>
         </div>
     </header>
 
-    <main class="flex-1 overflow-hidden p-6 flex flex-col gap-6">
+    <main class="flex-1 overflow-hidden p-6 flex flex-col gap-4">
         
         <div class="grid grid-cols-1 lg:grid-cols-4 gap-6 shrink-0 h-64">
             
@@ -92,6 +90,39 @@
             </div>
         </div>
 
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 shrink-0">
+            <!-- Files -->
+            <details class="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden group">
+                <summary class="p-3 bg-slate-850 cursor-pointer font-semibold text-xs uppercase tracking-wider text-slate-500 hover:text-slate-300">
+                    Files (<span id="files-count">0</span>)
+                </summary>
+                <div class="p-4 max-h-48 overflow-y-auto custom-scrollbar border-t border-slate-800">
+                    <ul id="files-list" class="space-y-2 text-sm"></ul>
+                    <div id="files-empty" class="text-slate-500 text-sm italic">No files yet.</div>
+                </div>
+            </details>
+            
+            <!-- Messages -->
+            <details class="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden group" open>
+                <summary class="p-3 bg-slate-850 cursor-pointer font-semibold text-xs uppercase tracking-wider text-slate-500 hover:text-slate-300">
+                    Messages
+                </summary>
+                <div class="p-4 max-h-48 overflow-y-auto custom-scrollbar bg-slate-950/50 border-t border-slate-800 flex flex-col gap-2" id="messages-list">
+                    <div id="messages-empty" class="text-slate-500 text-sm italic">No messages yet.</div>
+                </div>
+            </details>
+
+            <!-- Event Ledger -->
+            <details class="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden group">
+                <summary class="p-3 bg-slate-850 cursor-pointer font-semibold text-xs uppercase tracking-wider text-slate-500 hover:text-slate-300">
+                    Event Ledger
+                </summary>
+                <div class="p-4 max-h-48 overflow-y-auto custom-scrollbar relative border-t border-slate-800 flex flex-col gap-3" id="events-list">
+                    <div id="events-empty" class="text-slate-500 text-sm italic">No events yet.</div>
+                </div>
+            </details>
+        </div>
+
         <div class="flex-1 bg-slate-900 border border-slate-800 rounded-lg flex flex-col overflow-hidden">
             <div class="p-4 border-b border-slate-800 flex justify-between items-center shrink-0">
                 <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-500">Action History</h2>
@@ -108,6 +139,7 @@
                     <thead class="sticky top-0 bg-slate-900 shadow-sm z-10">
                         <tr>
                             <th class="py-3 px-4 font-medium text-slate-500 border-b border-slate-800 w-20">Turn</th>
+                            <th class="py-3 px-4 font-medium text-slate-500 border-b border-slate-800 w-24">Agent</th>
                             <th class="py-3 px-4 font-medium text-slate-500 border-b border-slate-800 w-32">Time</th>
                             <th class="py-3 px-4 font-medium text-slate-500 border-b border-slate-800 w-48">Tool</th>
                             <th class="py-3 px-4 font-medium text-slate-500 border-b border-slate-800">Arguments / Result</th>
@@ -123,14 +155,27 @@
     </main>
 
     <script>
+        const AGENT_COLORS = ['#818cf8', '#34d399', '#f472b6', '#fbbf24', '#a78bfa', '#fb923c', '#22d3ee', '#e879f9'];
+        const agentColorMap = {};
+        let agentColorIndex = 0;
+        
+        function getAgentColor(agentId) {
+            if (!agentId) return null;
+            if (!agentColorMap[agentId]) {
+                agentColorMap[agentId] = AGENT_COLORS[agentColorIndex % AGENT_COLORS.length];
+                agentColorIndex++;
+            }
+            return agentColorMap[agentId];
+        }
+
         let currentRunId = null;
         let eventSource = null;
         let chart = null;
-        let chartData = { labels: [], balances: [] };
+        let chartData = { labels: [], datasets: {}, balances: [] }; 
         let isHoveringLog = false;
         
         const runSelector = document.getElementById('run-selector');
-        const currentBalanceEl = document.getElementById('current-balance');
+        const balanceContainer = document.getElementById('balance-container');
         const logContainer = document.getElementById('log-container');
         const logBody = document.getElementById('log-body');
         const autoScrollCheckbox = document.getElementById('auto-scroll');
@@ -140,6 +185,14 @@
         const statDropped = document.getElementById('stat-dropped');
         const statProcessed = document.getElementById('stat-processed');
         const statEarned = document.getElementById('stat-earned');
+
+        const filesList = document.getElementById('files-list');
+        const filesCount = document.getElementById('files-count');
+        const filesEmpty = document.getElementById('files-empty');
+        const messagesList = document.getElementById('messages-list');
+        let messagesEmpty = document.getElementById('messages-empty');
+        const eventsList = document.getElementById('events-list');
+        let eventsEmpty = document.getElementById('events-empty');
 
         function initChart() {
             const ctx = document.getElementById('balanceChart').getContext('2d');
@@ -151,24 +204,23 @@
                 type: 'line',
                 data: {
                     labels: chartData.labels,
-                    datasets: [{
-                        label: 'Balance',
-                        data: chartData.balances,
-                        borderColor: '#818cf8',
-                        backgroundColor: 'rgba(129, 140, 248, 0.1)',
-                        borderWidth: 2,
-                        pointRadius: 0,
-                        pointHoverRadius: 4,
-                        fill: true,
-                        tension: 0.1
-                    }]
+                    datasets: []
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
                     animation: { duration: 0 },
                     plugins: {
-                        legend: { display: false },
+                        legend: { 
+                            display: true,
+                            position: 'top',
+                            align: 'end',
+                            labels: {
+                                boxWidth: 12,
+                                usePointStyle: true,
+                                color: '#94a3b8'
+                            }
+                        },
                         tooltip: {
                             mode: 'index',
                             intersect: false,
@@ -176,12 +228,7 @@
                             titleColor: '#e2e8f0',
                             bodyColor: '#e2e8f0',
                             borderColor: '#334155',
-                            borderWidth: 1,
-                            callbacks: {
-                                label: function(context) {
-                                    return ` Balance: ${context.parsed.y.toFixed(2)}`;
-                                }
-                            }
+                            borderWidth: 1
                         }
                     },
                     scales: {
@@ -199,16 +246,70 @@
         }
 
         function updateChart(txs) {
+            let isMultiAgent = false;
+            
             txs.forEach(tx => {
                 const date = new Date(tx.timestamp);
                 const timeStr = `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}:${date.getSeconds().toString().padStart(2, '0')}`;
-                chartData.labels.push(timeStr);
-                chartData.balances.push(tx.balance_after);
+                
+                if (!chartData.labels.includes(timeStr)) {
+                    chartData.labels.push(timeStr);
+                }
+
+                const agentId = tx.agent_id || 'System';
+                if (tx.agent_id) isMultiAgent = true;
+
+                if (!chartData.datasets[agentId]) {
+                    const color = getAgentColor(tx.agent_id) || '#818cf8';
+                    chartData.datasets[agentId] = {
+                        label: agentId === 'System' ? 'Balance' : `Agent ${agentId.substring(0,6)}`,
+                        data: Array(chartData.labels.length - 1).fill(null),
+                        borderColor: color,
+                        backgroundColor: `${color}1A`,
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        pointHoverRadius: 4,
+                        fill: agentId === 'System',
+                        tension: 0.1,
+                        spanGaps: true
+                    };
+                }
+                
+                chartData.datasets[agentId].data.push(tx.balance_after);
+                
+                // Align other datasets
+                Object.keys(chartData.datasets).forEach(id => {
+                    if (id !== agentId) {
+                        const ds = chartData.datasets[id];
+                        if (ds.data.length < chartData.labels.length) {
+                            ds.data.push(ds.data.length > 0 ? ds.data[ds.data.length - 1] : null);
+                        }
+                    }
+                });
             });
+
+            chart.data.datasets = Object.values(chartData.datasets);
+            chart.options.plugins.legend.display = isMultiAgent;
             chart.update();
-            
-            if (chartData.balances.length > 0) {
-                currentBalanceEl.textContent = chartData.balances[chartData.balances.length - 1].toFixed(2);
+        }
+
+        function updateHeader(summary) {
+            if (summary.agents && summary.agents.length > 0) {
+                balanceContainer.innerHTML = summary.agents.map(a => {
+                    const color = getAgentColor(a.agent_id);
+                    return `
+                        <div class="text-sm font-medium bg-slate-800 px-3 py-1.5 rounded-md border border-slate-700 flex items-center gap-2">
+                            <span style="color: ${color}">${a.agent_id.substring(0,6)}</span>
+                            <span class="font-mono text-lg" style="color: ${color}">${a.balance.toFixed(2)}</span>
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                balanceContainer.innerHTML = `
+                    <div class="text-sm font-medium bg-slate-800 px-4 py-1.5 rounded-md border border-slate-700">
+                        Balance: <span id="current-balance" class="text-emerald-400 font-mono text-lg">${(summary.current_balance || 0).toFixed(2)}</span> 
+                    </div>
+                `;
             }
         }
 
@@ -248,8 +349,15 @@
                 let resultSnippet = action.result ? action.result.substring(0, 100) : '';
                 if (action.result && action.result.length > 100) resultSnippet += '...';
                 
+                let agentBadge = '';
+                if (action.agent_id) {
+                    const color = getAgentColor(action.agent_id);
+                    agentBadge = `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border border-slate-700/50" style="color: ${color}; background-color: ${color}20">${action.agent_id.substring(0,6)}</span>`;
+                }
+
                 tr.innerHTML = `
                     <td class="py-2 px-4 font-mono text-slate-400">${action.turn}</td>
+                    <td class="py-2 px-4">${agentBadge}</td>
                     <td class="py-2 px-4 text-slate-500 text-xs">${timeStr}</td>
                     <td class="py-2 px-4">
                         <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${toolColor} border border-slate-700/50">
@@ -272,6 +380,84 @@
             if (autoScrollCheckbox.checked && !isHoveringLog) {
                 logContainer.scrollTop = logContainer.scrollHeight;
             }
+        }
+
+        function appendMessages(messages) {
+            if (messages.length > 0) messagesEmpty.style.display = 'none';
+            messages.forEach(msg => {
+                const senderColor = getAgentColor(msg.sender_id) || '#94a3b8';
+                const div = document.createElement('div');
+                div.className = "bg-slate-900 border border-slate-800 p-2 rounded-md";
+                div.innerHTML = `
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="text-xs font-bold" style="color: ${senderColor}">${msg.sender_id.substring(0,8)}</span>
+                        <span class="text-[10px] text-slate-500 font-mono">Turn ${msg.turn}</span>
+                    </div>
+                    <div class="text-sm text-slate-300 whitespace-pre-wrap">${msg.content}</div>
+                `;
+                messagesList.appendChild(div);
+            });
+            if (messagesList.parentElement.open) {
+                messagesList.scrollTop = messagesList.scrollHeight;
+            }
+        }
+
+        function appendEvents(events) {
+            if (events.length > 0) eventsEmpty.style.display = 'none';
+            events.forEach(evt => {
+                const color = getAgentColor(evt.agent_id) || '#94a3b8';
+                const div = document.createElement('div');
+                div.className = "flex items-start gap-3 border-l-2 pl-3 py-1 relative";
+                div.style.borderColor = color;
+                
+                const date = new Date(evt.timestamp);
+                const timeStr = `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+                
+                div.innerHTML = `
+                    <div class="absolute -left-[5px] top-3 w-2 h-2 rounded-full" style="background-color: ${color}"></div>
+                    <div class="flex flex-col">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs font-semibold text-slate-200">${evt.event_type}</span>
+                            <span class="text-[10px] text-slate-500">${timeStr}</span>
+                        </div>
+                        <div class="text-xs text-slate-400 mt-0.5">${evt.details || ''}</div>
+                    </div>
+                `;
+                eventsList.appendChild(div);
+            });
+            if (eventsList.parentElement.open) {
+                eventsList.scrollTop = eventsList.scrollHeight;
+            }
+        }
+
+        function updateFiles(files) {
+            filesCount.textContent = files.length;
+            if (files.length > 0) filesEmpty.style.display = 'none';
+            filesList.innerHTML = '';
+            
+            files.forEach(file => {
+                const li = document.createElement('li');
+                li.className = "flex justify-between items-center bg-slate-900 border border-slate-800 p-2 rounded-md";
+                
+                let statusBadge = '';
+                if (file.status === 'processed') {
+                    statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Processed</span>`;
+                } else if (file.status === 'dropped') {
+                    statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">Dropped</span>`;
+                }
+                
+                li.innerHTML = `
+                    <div class="flex flex-col">
+                        <span class="text-slate-300 font-mono text-xs">${file.filename}</span>
+                        <span class="text-[10px] text-slate-500">${file.file_type}</span>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        ${file.credits_earned ? `<span class="text-xs text-emerald-400 font-mono">+${file.credits_earned.toFixed(2)}</span>` : ''}
+                        ${statusBadge}
+                    </div>
+                `;
+                filesList.appendChild(li);
+            });
         }
 
         function updateStats(stats) {
@@ -308,23 +494,39 @@
 
         async function loadHistoricalData(runId) {
             chartData.labels = [];
+            chartData.datasets = {};
             chartData.balances = [];
             logBody.innerHTML = '';
+            messagesList.innerHTML = '<div id="messages-empty" class="text-slate-500 text-sm italic">No messages yet.</div>';
+            eventsList.innerHTML = '<div id="events-empty" class="text-slate-500 text-sm italic">No events yet.</div>';
             emptyLog.style.display = 'block';
+            messagesEmpty = document.getElementById('messages-empty');
+            eventsEmpty = document.getElementById('events-empty');
+            
             chart.update();
 
-            const [actionsRes, balanceRes, summaryRes, filesRes] = await Promise.all([
+            const [actionsRes, balanceRes, summaryRes, filesRes, messagesRes, eventsRes] = await Promise.all([
                 fetch(`/api/runs/${runId}/actions`),
                 fetch(`/api/runs/${runId}/balance`),
                 fetch(`/api/runs/${runId}/summary`),
-                fetch(`/api/runs/${runId}/files`)
+                fetch(`/api/runs/${runId}/files`),
+                fetch(`/api/runs/${runId}/messages`),
+                fetch(`/api/runs/${runId}/events`)
             ]);
 
             const actions = await actionsRes.json();
             const balances = await balanceRes.json();
+            const summary = await summaryRes.json();
+            const files = await filesRes.json();
+            const messages = await messagesRes.json();
+            const events = await eventsRes.json();
             
+            updateHeader(summary);
+            updateFiles(files);
             appendActions(actions.reverse());
             updateChart(balances);
+            appendMessages(messages);
+            appendEvents(events.reverse());
         }
 
         function setupSSE(runId) {
@@ -349,11 +551,23 @@
             eventSource.addEventListener('balance', (e) => {
                 const txs = JSON.parse(e.data);
                 updateChart(txs);
+                fetch(`/api/runs/${runId}/summary`).then(r => r.json()).then(s => updateHeader(s));
+            });
+
+            eventSource.addEventListener('messages', (e) => {
+                const msgs = JSON.parse(e.data);
+                appendMessages(msgs);
+            });
+
+            eventSource.addEventListener('events', (e) => {
+                const evts = JSON.parse(e.data);
+                appendEvents(evts);
             });
 
             eventSource.addEventListener('file_stats', (e) => {
                 const stats = JSON.parse(e.data);
                 updateStats(stats);
+                fetch(`/api/runs/${runId}/files`).then(r => r.json()).then(f => updateFiles(f));
             });
 
             eventSource.onerror = () => {

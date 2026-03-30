@@ -47,7 +47,7 @@ class DashboardServer:
                 cursor = conn.cursor()
                 cursor.execute(
                     """
-                    SELECT id, turn, tool_name, tool_args, result, credits_before, credits_after, duration_ms, timestamp 
+                    SELECT id, turn, tool_name, tool_args, result, credits_before, credits_after, duration_ms, agent_id, timestamp 
                     FROM actions 
                     WHERE run_id = ? 
                     ORDER BY turn DESC, timestamp DESC
@@ -72,7 +72,7 @@ class DashboardServer:
                 cursor = conn.cursor()
                 cursor.execute(
                     """
-                    SELECT timestamp, amount, type, reason, balance_after
+                    SELECT timestamp, amount, type, reason, balance_after, agent_id
                     FROM credit_transactions
                     WHERE run_id = ?
                     ORDER BY timestamp ASC, id ASC
@@ -137,13 +137,91 @@ class DashboardServer:
                     bal_row["balance_after"] if bal_row else 0.0
                 )
 
+                cursor.execute(
+                    "SELECT DISTINCT agent_id FROM actions WHERE run_id = ? AND agent_id IS NOT NULL",
+                    (run_id,),
+                )
+                agents_rows = cursor.fetchall()
+                agents = []
+                for a_row in agents_rows:
+                    a_id = a_row["agent_id"]
+                    cursor.execute(
+                        "SELECT balance_after FROM credit_transactions WHERE run_id = ? AND agent_id = ? ORDER BY timestamp DESC, id DESC LIMIT 1",
+                        (run_id, a_id),
+                    )
+                    a_bal_row = cursor.fetchone()
+
+                    cursor.execute(
+                        "SELECT to_state FROM state_transitions WHERE run_id = ? AND agent_id = ? ORDER BY timestamp DESC, id DESC LIMIT 1",
+                        (run_id, a_id),
+                    )
+                    a_state_row = cursor.fetchone()
+
+                    agents.append(
+                        {
+                            "agent_id": a_id,
+                            "balance": a_bal_row["balance_after"] if a_bal_row else 0.0,
+                            "state": a_state_row["to_state"]
+                            if a_state_row
+                            else "UNKNOWN",
+                        }
+                    )
+                run_info["agents"] = agents
+
+                cursor.execute(
+                    "SELECT agent_id, from_state, to_state, timestamp FROM state_transitions WHERE run_id = ? ORDER BY timestamp DESC",
+                    (run_id,),
+                )
+                run_info["recent_state_changes"] = [dict(r) for r in cursor.fetchall()]
+
                 return run_info
 
+        @self.app.get("/api/runs/{run_id}/messages")
+        async def get_run_messages(run_id: str):
+            with LoggingDB(self.db_path).read_only_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT id, sender_id, recipient_id, content, round_num, turn, read, timestamp 
+                    FROM messages WHERE run_id = ? ORDER BY timestamp ASC
+                    """,
+                    (run_id,),
+                )
+                return [dict(row) for row in cursor.fetchall()]
+
+        @self.app.get("/api/runs/{run_id}/events")
+        async def get_run_events(run_id: str):
+            with LoggingDB(self.db_path).read_only_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT id, round_num, agent_id, event_type, details, credit_delta, timestamp 
+                    FROM event_ledger WHERE run_id = ? ORDER BY timestamp DESC LIMIT 50
+                    """,
+                    (run_id,),
+                )
+                return [dict(row) for row in cursor.fetchall()]
+
+        @self.app.get("/api/runs/{run_id}/state-transitions")
+        async def get_run_state_transitions(run_id: str):
+            with LoggingDB(self.db_path).read_only_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT id, turn, from_state, to_state, reason, balance, starvation_counter, agent_id, timestamp 
+                    FROM state_transitions WHERE run_id = ? ORDER BY timestamp DESC
+                    """,
+                    (run_id,),
+                )
+                return [dict(row) for row in cursor.fetchall()]
+
         @self.app.get("/api/events")
-        async def sse_events(request: Request, run_id: str = None):
+        async def sse_events(request: Request, run_id: str | None = None):
             async def event_generator() -> AsyncGenerator[str, None]:
                 last_action_id = 0
                 last_tx_id = 0
+                last_message_id = 0
+                last_event_id = 0
                 current_run_id = run_id
 
                 while True:
@@ -169,7 +247,7 @@ class DashboardServer:
 
                             cursor.execute(
                                 """
-                                SELECT id, turn, tool_name, tool_args, result, credits_before, credits_after, duration_ms, timestamp 
+                                SELECT id, turn, tool_name, tool_args, result, credits_before, credits_after, duration_ms, agent_id, timestamp 
                                 FROM actions 
                                 WHERE run_id = ? AND id > ? 
                                 ORDER BY id ASC
@@ -193,7 +271,7 @@ class DashboardServer:
 
                             cursor.execute(
                                 """
-                                SELECT id, timestamp, amount, type, reason, balance_after
+                                SELECT id, timestamp, amount, type, reason, balance_after, agent_id
                                 FROM credit_transactions
                                 WHERE run_id = ? AND id > ?
                                 ORDER BY id ASC
@@ -207,6 +285,40 @@ class DashboardServer:
                                 txs.append(tx)
                             if txs:
                                 events.append({"type": "balance", "data": txs})
+
+                            cursor.execute(
+                                """
+                                SELECT id, sender_id, recipient_id, content, round_num, turn, read, timestamp
+                                FROM messages
+                                WHERE run_id = ? AND id > ?
+                                ORDER BY id ASC
+                                """,
+                                (current_run_id, last_message_id),
+                            )
+                            msgs = []
+                            for row in cursor.fetchall():
+                                msg = dict(row)
+                                last_message_id = max(last_message_id, msg["id"])
+                                msgs.append(msg)
+                            if msgs:
+                                events.append({"type": "messages", "data": msgs})
+
+                            cursor.execute(
+                                """
+                                SELECT id, round_num, agent_id, event_type, details, credit_delta, timestamp
+                                FROM event_ledger
+                                WHERE run_id = ? AND id > ?
+                                ORDER BY id ASC
+                                """,
+                                (current_run_id, last_event_id),
+                            )
+                            evts = []
+                            for row in cursor.fetchall():
+                                evt = dict(row)
+                                last_event_id = max(last_event_id, evt["id"])
+                                evts.append(evt)
+                            if evts:
+                                events.append({"type": "events", "data": evts})
 
                             cursor.execute(
                                 """
