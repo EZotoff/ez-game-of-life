@@ -17,6 +17,7 @@ from petri_dish.economy import CreditEconomy, SharedEconomy
 from petri_dish.llm_client import OllamaClient
 from petri_dish.logging_db import LoggingDB
 from petri_dish.null_model import NullModel
+from petri_dish.openai_client import OpenAICompatibleClient
 from petri_dish.orchestrator import (
     AgentOrchestrator,
     MultiAgentOrchestrator,
@@ -99,6 +100,22 @@ def _resolve_db_path(run_id: str) -> str:
     return str(db_dir / f"{run_id}.sqlite")
 
 
+def _create_llm_client(settings: Settings, null_model: bool) -> _ChatClient:
+    if null_model:
+        return NullModel()
+
+    if settings.llm_backend == "openai_compatible":
+        api_key = os.getenv(settings.openai_api_key_env_var, "")
+        return OpenAICompatibleClient(
+            api_key=api_key,
+            base_url=settings.openai_api_base_url,
+            model=settings.openai_model_name,
+            temperature=settings.default_temperature,
+        )
+
+    return OllamaClient(settings=settings)
+
+
 async def _run_experiment_async(
     *,
     config_path: str,
@@ -132,11 +149,7 @@ async def _run_experiment_async(
     tool_registry = get_all_tools(settings=settings)
     sandbox_manager = SandboxManager()
 
-    base_chat_client: _ChatClient
-    if null_model:
-        base_chat_client = NullModel()
-    else:
-        base_chat_client = OllamaClient(settings=settings)
+    base_chat_client = _create_llm_client(settings, null_model)
 
     context_manager = ContextManager(settings=settings)
     degradation_manager = DegradationManager(settings=settings)
@@ -233,10 +246,7 @@ async def _run_multi_agent_async(
 
     llm_clients: dict[str, _ChatClient] = {}
     for name in agent_names:
-        if null_model:
-            llm_clients[name] = NullModel()
-        else:
-            llm_clients[name] = OllamaClient(settings=settings)
+        llm_clients[name] = _create_llm_client(settings, null_model)
 
     orchestrator = MultiAgentOrchestrator(
         settings=settings,

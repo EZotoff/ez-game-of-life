@@ -34,9 +34,14 @@ def main() -> int:
         default=None,
         help="Number of agents (overrides multi_agent_count in config)",
     )
+    parser.add_argument(
+        "--api",
+        action="store_true",
+        help="Use OpenAI-compatible API backend (Z.AI, OpenAI, etc.)",
+    )
     args = parser.parse_args()
 
-    if args.agents is not None or args.multi_agent:
+    if args.agents is not None or args.multi_agent or args.api:
         import yaml as _yaml
 
         config_path = Path(args.config)
@@ -50,6 +55,8 @@ def main() -> int:
         if args.agents is not None:
             cfg["multi_agent_enabled"] = True
             cfg["multi_agent_count"] = args.agents
+        if args.api:
+            cfg["llm_backend"] = "openai_compatible"
         import tempfile, os
 
         tmp = tempfile.NamedTemporaryFile(
