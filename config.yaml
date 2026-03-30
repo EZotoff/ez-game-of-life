@@ -17,6 +17,12 @@ context_summary_interval_turns: 40
 model_name: hf.co/bartowski/Qwen_Qwen3-30B-A3B-Instruct-2507-GGUF:IQ3_XS
 ollama_base_url: http://localhost:11434
 
+# LLM Backend (ollama or openai_compatible)
+llm_backend: ollama
+openai_api_base_url: https://api.z.ai/api/paas/v4
+openai_api_key_env_var: ZAI_API_KEY
+openai_model_name: glm-5
+
 # Docker Container Parameters
 docker_image: python:3.12-slim
 docker_mem_limit: 512m

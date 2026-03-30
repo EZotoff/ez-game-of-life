@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     default_temperature: float = 0.8
 
+    # LLM Backend Selection
+    llm_backend: Literal["ollama", "openai_compatible"] = "ollama"
+    openai_api_base_url: str = "https://api.z.ai/api/paas/v4"
+    openai_api_key_env_var: str = "ZAI_API_KEY"
+    openai_model_name: str = "glm-5"
+
     # Docker Container Parameters
     docker_image: str = "python:3.12-slim"
     docker_mem_limit: str = "512m"
