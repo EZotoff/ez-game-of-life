@@ -45,6 +45,7 @@ class CreditEconomy:
         self.balance: float = self.initial_balance
         self.burn_rate_per_turn: float = float(settings.burn_rate_per_turn)
         self.starvation_turns: int = int(settings.starvation_turns)
+        self.lifetime_credits_earned: float = self.initial_balance
 
         self._degradation_tiers: dict[str, float] = settings.degradation_tiers
         self._premium_threshold: float = float(
@@ -99,6 +100,8 @@ class CreditEconomy:
         """
         old_balance = self.balance
         self.balance += amount
+        if amount > 0:
+            self.lifetime_credits_earned += amount
         logger.info(
             "CREDIT: +%.4f credits | %.2f -> %.2f",
             amount,
@@ -225,21 +228,37 @@ class SharedEconomy:
     def handle_death(self, agent_id: str) -> float:
         economy = self.agent_economies[agent_id]
         balance = economy.get_balance()
-        burn = balance * self.settings.multi_agent_burn_pct
-        salvage = balance * self.settings.multi_agent_salvage_pct
 
-        economy.credit(-(burn + salvage))
+        # Penalty base uses lifetime earnings (not just current balance) so death
+        # is costly even when the agent has spent down to 0 before dying.
+        penalty_base = max(
+            balance,
+            economy.lifetime_credits_earned,
+            self.settings.initial_balance,
+        )
+        burn = penalty_base * self.settings.multi_agent_burn_pct
+        salvage = penalty_base * self.settings.multi_agent_salvage_pct
+
+        total_penalty = burn + salvage
+        if balance >= total_penalty:
+            economy.credit(-total_penalty)
+        else:
+            economy.credit(-balance)
+            self.agent_debt[agent_id] += total_penalty - balance
+
         self.common_pool += salvage
 
         economy.state = AgentState.DEAD
         economy.starvation_counter = 0
         self.spectator_counters[agent_id] = 0
         logger.info(
-            "DEATH: %s forfeited %.2f (burned=%.2f, salvage=%.2f)",
+            "DEATH: %s forfeited %.2f of %.2f lifetime (burned=%.2f, salvage=%.2f, debt=%.2f)",
             agent_id,
-            burn + salvage,
+            total_penalty,
+            penalty_base,
             burn,
             salvage,
+            self.agent_debt[agent_id],
         )
         return salvage
 

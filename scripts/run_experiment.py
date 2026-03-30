@@ -55,9 +55,32 @@ def main() -> int:
         tmp = tempfile.NamedTemporaryFile(
             mode="w", suffix=".yaml", delete=False, dir=str(config_path.parent)
         )
-        _yaml.dump(cfg, tmp)
-        tmp.close()
-        config_to_use = tmp.name
+        try:
+            _yaml.dump(cfg, tmp)
+            tmp.close()
+            config_to_use = tmp.name
+
+            result = run_experiment_with_id(
+                config_path=config_to_use,
+                null_model=args.null,
+                run_id=args.run_id,
+            )
+            print(
+                json.dumps(
+                    {
+                        "total_turns": result.total_turns,
+                        "final_balance": result.final_balance,
+                        "tiers_reached": result.tiers_reached,
+                        "termination_reason": result.termination_reason,
+                    }
+                )
+            )
+        finally:
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+        return 0
     else:
         config_to_use = args.config
 

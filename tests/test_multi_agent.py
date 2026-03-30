@@ -154,6 +154,41 @@ class TestSharedEconomy:
         assert economy.get_common_pool() == pytest.approx(30.0)
         assert economy.get_agent_balance("a1") == pytest.approx(40.0)
 
+    def test_handle_death_at_zero_balance_creates_debt(self):
+        settings = Settings(
+            initial_balance=100.0,
+            multi_agent_burn_pct=0.3,
+            multi_agent_salvage_pct=0.3,
+        )
+        economy = SharedEconomy(settings=settings, agent_ids=["a1"])
+
+        economy.debit("a1", turns=1000)
+        assert economy.get_agent_balance("a1") <= 0
+
+        salvage = economy.handle_death("a1")
+
+        assert salvage == pytest.approx(30.0)
+        assert economy.get_common_pool() == pytest.approx(30.0)
+        assert economy.get_agent_debt("a1") == pytest.approx(60.0)
+
+    def test_handle_death_uses_lifetime_earned_as_penalty_base(self):
+        settings = Settings(
+            initial_balance=100.0,
+            multi_agent_burn_pct=0.3,
+            multi_agent_salvage_pct=0.3,
+        )
+        economy = SharedEconomy(settings=settings, agent_ids=["a1"])
+
+        economy.credit("a1", 200.0)
+        economy.debit("a1", turns=3000)
+        assert economy.get_agent_balance("a1") <= 0
+        assert economy.get_agent_economy("a1").lifetime_credits_earned == 300.0
+
+        salvage = economy.handle_death("a1")
+
+        assert salvage == pytest.approx(90.0)
+        assert economy.get_common_pool() == pytest.approx(90.0)
+
     def test_handle_death_sets_state_to_dead(self):
         economy = SharedEconomy(settings=Settings(), agent_ids=["a1"])
 

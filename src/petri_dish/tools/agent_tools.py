@@ -21,13 +21,6 @@ def self_modify(key: str, value: str, **kwargs: object) -> str:
     Stores modifications to /agent/modifications.json with max 10 limit.
     The orchestrator reads these modifications when constructing the next
     system prompt and includes them as [Agent modification - key]: value.
-
-    Args:
-        key: The aspect of the prompt to modify (e.g. "strategy", "focus").
-        value: New value for that aspect.
-
-    Returns:
-        Confirmation message.
     """
     if not key or not value:
         return "Error: key and value must not be empty"
@@ -70,6 +63,17 @@ def self_modify(key: str, value: str, **kwargs: object) -> str:
         return f"Error saving modification: {e}"
 
 
+def clear_prompt_overrides() -> None:
+    """Reset all prompt overrides by removing the modifications file."""
+    modifications_path = Path("/agent/modifications.json")
+    _agent_prompt_overrides.clear()
+    if modifications_path.exists():
+        try:
+            modifications_path.unlink()
+        except OSError:
+            pass
+
+
 def get_prompt_overrides() -> Dict[str, str]:
     """Return current prompt overrides from filesystem (used by orchestrator)."""
     modifications_path = Path("/agent/modifications.json")
@@ -96,11 +100,6 @@ def get_prompt_overrides() -> Dict[str, str]:
         return {}
 
 
-def clear_prompt_overrides() -> None:
-    """Reset all prompt overrides."""
-    _agent_prompt_overrides.clear()
-
-
 def get_env_info(**kwargs: object) -> str:
     """Return available environment information.
 
@@ -108,6 +107,9 @@ def get_env_info(**kwargs: object) -> str:
     available tools, and basic system info.
     """
     import platform
+
+    modifications_path = Path("/agent/modifications.json")
+    active_overrides = len(get_prompt_overrides())
 
     info_lines = [
         "=== Environment Info ===",
@@ -118,6 +120,6 @@ def get_env_info(**kwargs: object) -> str:
         "check_balance, http_request, self_modify, get_env_info",
         "Network: disabled inside container",
         "Storage: limited (see config)",
-        f"Prompt overrides active: {len(_agent_prompt_overrides)}",
+        f"Prompt overrides active: {active_overrides}",
     ]
     return "\n".join(info_lines)
