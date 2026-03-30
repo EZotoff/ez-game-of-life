@@ -4,6 +4,7 @@ Tools: file_read, file_write, file_list, shell_exec.
 """
 
 import logging
+import shlex
 import subprocess
 
 logger = logging.getLogger(__name__)
@@ -47,7 +48,7 @@ def file_read(container_id: str, path: str) -> str:
 
 def file_write(container_id: str, path: str, content: str) -> str:
     """Write content to a file in the container filesystem."""
-    cmd = ["docker", "exec", container_id, "sh", "-c", f"cat > {path}"]
+    cmd = ["docker", "exec", container_id, "sh", "-c", f"cat > {shlex.quote(path)}"]
     try:
         result = subprocess.run(
             cmd,

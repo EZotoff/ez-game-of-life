@@ -168,6 +168,11 @@
             return agentColorMap[agentId];
         }
 
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
         let currentRunId = null;
         let eventSource = null;
         let chart = null;
@@ -346,13 +351,13 @@
                 if (action.tool_name.includes('shell')) toolColor = 'bg-orange-500/10 text-orange-400';
                 if (action.tool_name === 'error' || action.tool_name.includes('invalid')) toolColor = 'bg-rose-500/10 text-rose-400';
 
-                let resultSnippet = action.result ? action.result.substring(0, 100) : '';
+                let resultSnippet = action.result ? escapeHtml(action.result.substring(0, 100)) : '';
                 if (action.result && action.result.length > 100) resultSnippet += '...';
                 
                 let agentBadge = '';
                 if (action.agent_id) {
                     const color = getAgentColor(action.agent_id);
-                    agentBadge = `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border border-slate-700/50" style="color: ${color}; background-color: ${color}20">${action.agent_id.substring(0,6)}</span>`;
+                    agentBadge = `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border border-slate-700/50" style="color: ${color}; background-color: ${color}20">${escapeHtml(action.agent_id.substring(0,6))}</span>`;
                 }
 
                 tr.innerHTML = `
@@ -361,7 +366,7 @@
                     <td class="py-2 px-4 text-slate-500 text-xs">${timeStr}</td>
                     <td class="py-2 px-4">
                         <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${toolColor} border border-slate-700/50">
-                            ${action.tool_name}
+                            ${escapeHtml(action.tool_name)}
                         </span>
                     </td>
                     <td class="py-2 px-4">
@@ -390,10 +395,10 @@
                 div.className = "bg-slate-900 border border-slate-800 p-2 rounded-md";
                 div.innerHTML = `
                     <div class="flex justify-between items-center mb-1">
-                        <span class="text-xs font-bold" style="color: ${senderColor}">${msg.sender_id.substring(0,8)}</span>
+                        <span class="text-xs font-bold" style="color: ${senderColor}">${escapeHtml(msg.sender_id.substring(0,8))}</span>
                         <span class="text-[10px] text-slate-500 font-mono">Turn ${msg.turn}</span>
                     </div>
-                    <div class="text-sm text-slate-300 whitespace-pre-wrap">${msg.content}</div>
+                    <div class="text-sm text-slate-300 whitespace-pre-wrap">${escapeHtml(msg.content)}</div>
                 `;
                 messagesList.appendChild(div);
             });
@@ -417,10 +422,10 @@
                     <div class="absolute -left-[5px] top-3 w-2 h-2 rounded-full" style="background-color: ${color}"></div>
                     <div class="flex flex-col">
                         <div class="flex items-center gap-2">
-                            <span class="text-xs font-semibold text-slate-200">${evt.event_type}</span>
+                            <span class="text-xs font-semibold text-slate-200">${escapeHtml(evt.event_type)}</span>
                             <span class="text-[10px] text-slate-500">${timeStr}</span>
                         </div>
-                        <div class="text-xs text-slate-400 mt-0.5">${evt.details || ''}</div>
+                        <div class="text-xs text-slate-400 mt-0.5">${escapeHtml(evt.details)}</div>
                     </div>
                 `;
                 eventsList.appendChild(div);
@@ -448,8 +453,8 @@
                 
                 li.innerHTML = `
                     <div class="flex flex-col">
-                        <span class="text-slate-300 font-mono text-xs">${file.filename}</span>
-                        <span class="text-[10px] text-slate-500">${file.file_type}</span>
+                        <span class="text-slate-300 font-mono text-xs">${escapeHtml(file.filename)}</span>
+                        <span class="text-[10px] text-slate-500">${escapeHtml(file.file_type)}</span>
                     </div>
                     <div class="flex items-center gap-3">
                         ${file.credits_earned ? `<span class="text-xs text-emerald-400 font-mono">+${file.credits_earned.toFixed(2)}</span>` : ''}
