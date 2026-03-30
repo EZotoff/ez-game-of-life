@@ -1083,13 +1083,21 @@ class MultiAgentOrchestrator:
         if not files:
             return
         for filename, content in files:
+            file_type = filename.rsplit(".", 1)[-1]
             if self._shared_volume_dir:
                 target_path = Path(self._shared_volume_dir) / filename
                 target_path.write_text(content)
                 self.logging_db.log_file_drop(
                     run_id=run_id,
                     filename=filename,
-                    file_type=filename.rsplit(".", 1)[-1],
+                    file_type=file_type,
+                )
+                self.logging_db.log_event(
+                    run_id,
+                    self._round,
+                    "system",
+                    "ecology_drop",
+                    f"file={filename}, type={file_type}, target=shared_volume",
                 )
             else:
                 first_agent = next(iter(self.agent_ids), None)
@@ -1102,7 +1110,14 @@ class MultiAgentOrchestrator:
                         self.logging_db.log_file_drop(
                             run_id=run_id,
                             filename=filename,
-                            file_type=filename.rsplit(".", 1)[-1],
+                            file_type=file_type,
+                        )
+                        self.logging_db.log_event(
+                            run_id,
+                            self._round,
+                            first_agent,
+                            "ecology_drop",
+                            f"file={filename}, type={file_type}",
                         )
 
     def _deliver_pending_messages(self, run_id: str, agent_id: str) -> None:

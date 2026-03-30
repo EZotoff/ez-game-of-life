@@ -40,7 +40,7 @@ class LoggingDB:
         """Open database connection with WAL mode configuration."""
         if self._conn is None:
             # Use URI mode to support read-only connections for dashboard
-            uri = f"file:{self.db_path}?mode=rw"
+            uri = f"file:{self.db_path}?mode=rwc"
             self._conn = sqlite3.connect(uri, uri=True)
             self._conn.row_factory = sqlite3.Row
 
@@ -360,19 +360,31 @@ class LoggingDB:
             reason: Optional description of the transaction
             agent_id: Optional agent identifier for multi-agent runs
         """
-        # Get current balance after this transaction
+        # Get current balance after this transaction, scoped per agent
         conn = self._ensure_connection()
         cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT balance_after 
-            FROM credit_transactions 
-            WHERE run_id = ? 
-            ORDER BY timestamp DESC, id DESC 
-            LIMIT 1
-            """,
-            (run_id,),
-        )
+        if agent_id:
+            cursor.execute(
+                """
+                SELECT balance_after 
+                FROM credit_transactions 
+                WHERE run_id = ? AND agent_id = ?
+                ORDER BY timestamp DESC, id DESC 
+                LIMIT 1
+                """,
+                (run_id, agent_id),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT balance_after 
+                FROM credit_transactions 
+                WHERE run_id = ? AND agent_id IS NULL
+                ORDER BY timestamp DESC, id DESC 
+                LIMIT 1
+                """,
+                (run_id,),
+            )
         row = cursor.fetchone()
         current_balance = row["balance_after"] if row else 0.0
         balance_after = current_balance + amount
