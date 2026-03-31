@@ -142,6 +142,10 @@ class OllamaClient:
                 async with httpx.AsyncClient(timeout=timeout) as client:
                     response = await client.post(self.chat_url, json=payload)
 
+                if response.status_code == 404:
+                    logger.error("Ollama model not found (404): %s", self.model_name)
+                    return None
+
                 if response.status_code >= 500:
                     raise httpx.HTTPStatusError(
                         f"Ollama server error: {response.status_code}",

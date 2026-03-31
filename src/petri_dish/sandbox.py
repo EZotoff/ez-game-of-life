@@ -39,7 +39,7 @@ class SandboxManager:
 
     def _container_name(self, run_id: str) -> str:
         """Generate deterministic container name from run ID."""
-        return f"petri-{run_id[:8]}"
+        return f"petri-{run_id}"
 
     def _get_container(self, container_id: str) -> Container:
         """Fetch container object, raising SandboxError on failure."""
