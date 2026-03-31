@@ -25,6 +25,7 @@ def _build_tool_definitions() -> list[ToolDefinition]:
                 ),
             ],
             handler=container_tools.file_read,
+            free_when_stripped=True,
         ),
         ToolDefinition(
             name="file_write",

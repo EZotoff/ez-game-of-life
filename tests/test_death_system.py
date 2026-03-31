@@ -139,6 +139,7 @@ class TestToolRegistryStripped:
             "check_balance",
             "get_env_info",
             "file_list",
+            "file_read",
             "send_message",
             "read_messages",
             "pass_turn",
@@ -148,12 +149,12 @@ class TestToolRegistryStripped:
         assert registry.is_tool_allowed_when_stripped("check_balance") is True
         assert registry.is_tool_allowed_when_stripped("get_env_info") is True
         assert registry.is_tool_allowed_when_stripped("file_list") is True
+        assert registry.is_tool_allowed_when_stripped("file_read") is True
         assert registry.is_tool_allowed_when_stripped("send_message") is True
         assert registry.is_tool_allowed_when_stripped("read_messages") is True
         assert registry.is_tool_allowed_when_stripped("pass_turn") is True
 
     def test_non_stripped_tool_rejected(self, registry):
         assert registry.is_tool_allowed_when_stripped("file_write") is False
-        assert registry.is_tool_allowed_when_stripped("file_read") is False
         assert registry.is_tool_allowed_when_stripped("shell_exec") is False
         assert registry.is_tool_allowed_when_stripped("nonexistent_tool") is False

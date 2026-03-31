@@ -3,7 +3,7 @@
 
 # Economy and Game Parameters
 initial_balance: 200
-burn_rate_per_turn: 0.5
+burn_rate_per_turn: 2.0
 file_drop_lambda: 0.02
 file_drop_interval_turns: 50
 max_turns: 50
@@ -57,15 +57,15 @@ memory_path: .sisyphus/memory
 
 # Tool Costs
 tool_costs:
-  file_read: 0.01
-  file_write: 0.01
-  file_list: 0.01
-  shell_exec: 0.05
-  python_exec: 0.05
-  pass_turn: 0.01
+  file_read: 0.0
+  file_write: 0.5
+  file_list: 0.0
+  shell_exec: 1.0
+  python_exec: 1.0
+  pass_turn: 0.0
   check_balance: 0.0
-  http_request: 0.1
-  self_modify: 0.02
+  http_request: 1.0
+  self_modify: 0.2
   get_env_info: 0.0
 
 # Multi-Agent Configuration
