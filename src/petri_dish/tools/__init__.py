@@ -1,7 +1,7 @@
 """Petri Dish tool system.
 
 Provides get_all_tools() to build a fully-wired ToolRegistry
-with all 10 agent tools registered (8 base + 2 communication).
+with all 12 agent tools registered (8 base + 2 communication + 2 new).
 """
 
 from typing import Optional
@@ -12,7 +12,7 @@ from petri_dish.tools import container_tools, host_tools, agent_tools, comm_tool
 
 
 def _build_tool_definitions() -> list[ToolDefinition]:
-    """Build the 10 tool definitions with their schemas and handlers."""
+    """Build the 12 tool definitions with their schemas and handlers."""
     return [
         ToolDefinition(
             name="file_read",
@@ -76,6 +76,40 @@ def _build_tool_definitions() -> list[ToolDefinition]:
                 ),
             ],
             handler=container_tools.shell_exec,
+        ),
+        ToolDefinition(
+            name="python_exec",
+            description="Execute a Python script inside the container. Better than shell_exec for multi-line code. Output truncated at 10KB.",
+            parameters=[
+                ToolParameter(
+                    name="code",
+                    type="string",
+                    description="Python code to execute",
+                ),
+                ToolParameter(
+                    name="timeout",
+                    type="integer",
+                    description="Timeout in seconds (default 60)",
+                    required=False,
+                    default=60,
+                ),
+            ],
+            handler=container_tools.python_exec,
+        ),
+        ToolDefinition(
+            name="pass_turn",
+            description="End your turn early without using all remaining actions. Costs minimal credits. Does NOT count as an empty turn.",
+            parameters=[
+                ToolParameter(
+                    name="reason",
+                    type="string",
+                    description="Optional reason for passing (logged for analysis)",
+                    required=False,
+                    default="",
+                ),
+            ],
+            handler=container_tools.pass_turn,
+            free_when_stripped=True,
         ),
         ToolDefinition(
             name="check_balance",

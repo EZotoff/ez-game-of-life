@@ -301,6 +301,9 @@ class AgentOrchestrator:
                             self._termination_reason = "container_crash"
                             break
 
+                        if call.name == "pass_turn":
+                            break
+
                 self._tiers_reached.add(self.credit_economy.get_degradation_level())
 
                 if self._container_id:
@@ -964,6 +967,9 @@ class MultiAgentOrchestrator:
                                     "content": result,
                                 }
                             )
+
+                            if call.name == "pass_turn":
+                                break
 
                     # Validate outputs for this agent
                     container_id = self._agent_containers.get(agent_id, "")
