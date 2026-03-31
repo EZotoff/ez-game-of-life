@@ -4,9 +4,9 @@
 # Economy and Game Parameters
 initial_balance: 200
 burn_rate_per_turn: 2.0
-file_drop_lambda: 0.02
-file_drop_interval_turns: 50
-max_turns: 50
+file_drop_lambda: 0.2
+file_drop_interval_turns: 5
+max_turns: 30
 max_turns_per_tool: 1
 turn_timeout_seconds: 60
 max_consecutive_empty_turns: 10
