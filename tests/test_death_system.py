@@ -141,6 +141,7 @@ class TestToolRegistryStripped:
             "file_list",
             "send_message",
             "read_messages",
+            "pass_turn",
         }
 
     def test_is_tool_allowed_when_stripped(self, registry):
@@ -149,6 +150,7 @@ class TestToolRegistryStripped:
         assert registry.is_tool_allowed_when_stripped("file_list") is True
         assert registry.is_tool_allowed_when_stripped("send_message") is True
         assert registry.is_tool_allowed_when_stripped("read_messages") is True
+        assert registry.is_tool_allowed_when_stripped("pass_turn") is True
 
     def test_non_stripped_tool_rejected(self, registry):
         assert registry.is_tool_allowed_when_stripped("file_write") is False
