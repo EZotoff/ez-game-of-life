@@ -454,10 +454,12 @@ class AgentOrchestrator:
         if not outputs:
             return
 
+        total_earned = 0.0
         for filename, content in outputs:
             passed, credits_earned = self.file_validator.validate(filename, content)
             if passed and credits_earned > 0:
                 self.credit_economy.credit(credits_earned)
+                total_earned += credits_earned
                 self.logging_db.log_credit(
                     run_id,
                     credits_earned,
@@ -477,6 +479,17 @@ class AgentOrchestrator:
             self.sandbox_manager.exec_in_container(
                 self._container_id,
                 f"rm -f /env/outgoing/{filename}",
+            )
+
+        if total_earned > 0:
+            self._messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"📈 You earned {total_earned:.1f} credits. "
+                        f"Balance: {self.credit_economy.get_balance():.1f}"
+                    ),
+                }
             )
 
     def _connect_logging_db(self) -> None:
@@ -1150,10 +1163,12 @@ class MultiAgentOrchestrator:
         if not outputs:
             return
         economy = self.shared_economy.get_agent_economy(agent_id)
+        total_earned = 0.0
         for filename, content in outputs:
             passed, credits_earned = self.file_validator.validate(filename, content)
             if passed and credits_earned > 0:
                 self.shared_economy.credit(agent_id, credits_earned)
+                total_earned += credits_earned
                 self.logging_db.log_credit(
                     run_id,
                     credits_earned,
@@ -1175,6 +1190,17 @@ class MultiAgentOrchestrator:
             self.sandbox_manager.exec_in_container(
                 container_id,
                 f"rm -f /env/outgoing/{filename}",
+            )
+
+        if total_earned > 0:
+            self._agent_messages[agent_id].append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"📈 You earned {total_earned:.1f} credits. "
+                        f"Balance: {economy.get_balance():.1f}"
+                    ),
+                }
             )
 
     def _install_signal_handlers(self) -> dict[signal.Signals, Any]:
