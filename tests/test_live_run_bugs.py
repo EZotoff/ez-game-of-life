@@ -134,3 +134,231 @@ class TestLiveRunBugs:
         assert name0 != name1
         assert name0 == "petri-run-abc123-agent-0"
         assert name1 == "petri-run-abc123-agent-1"
+
+
+AgentOrchestrator = import_module("petri_dish.orchestrator").AgentOrchestrator
+CreditEconomy = import_module("petri_dish.economy").CreditEconomy
+SharedEconomy = import_module("petri_dish.economy").SharedEconomy
+FileValidator = import_module("petri_dish.validators").FileValidator
+ToolRegistry = import_module("petri_dish.tools.registry").ToolRegistry
+
+
+class TestRewardNotifications:
+    """Tests for deterministic reward notifications injected after FileValidator credits."""
+
+    def _make_fake_sandbox(self, outgoing_files: dict[str, str] | None = None):
+        """Create a FakeSandboxManager that returns specified files from /env/outgoing/."""
+        files = outgoing_files or {}
+
+        class FakeSandbox:
+            def __init__(self):
+                self.containers: dict[str, Any] = {}
+                self._deleted: list[str] = []
+
+            def create_container(
+                self, name, memory_host_path=None, shared_volume_host_path=None
+            ):
+                cid = f"fake-{name}"
+                self.containers[cid] = True
+                return cid
+
+            def destroy_container(self, cid):
+                self.containers.pop(cid, None)
+
+            def get_container_stats(self, cid):
+                return {"running": cid in self.containers}
+
+            def exec_in_container(self, cid, command):
+                if "ls /env/outgoing/" in command:
+                    return "\n".join(files.keys()) if files else ""
+                if command.startswith("rm -f"):
+                    self._deleted.append(command)
+                return ""
+
+            def read_file(self, cid, path):
+                fname = path.split("/")[-1]
+                return files.get(fname, "")
+
+            def write_file(self, cid, path, content):
+                pass
+
+            def list_directory(self, cid, path):
+                return []
+
+        return FakeSandbox()
+
+    def test_single_agent_reward_notification_injected(self):
+        """When FileValidator awards credits, a notification message is injected."""
+        csv_content = "name,age,email\nAlice,30,a@b.com\nBob,25,c@d.com\n"
+        sandbox = self._make_fake_sandbox({"data_001_csv_easy.csv": csv_content})
+
+        settings = Settings()
+        db = LoggingDB(":memory:")
+        db.connect()
+        db.log_run_start("test-reward", "{}")
+
+        economy = CreditEconomy(settings)
+        validator = FileValidator(settings)
+        registry = ToolRegistry()
+
+        orch = AgentOrchestrator(
+            settings=settings,
+            llm_client=None,
+            tool_parser=None,
+            tool_registry=registry,
+            credit_economy=economy,
+            sandbox_manager=sandbox,
+            logging_db=db,
+            file_validator=validator,
+        )
+        orch._container_id = "fake-test"
+        orch._messages = []
+        orch._turn = 1
+
+        initial_balance = economy.get_balance()
+        orch._validate_outputs("test-reward")
+
+        assert economy.get_balance() > initial_balance
+
+        reward_msgs = [m for m in orch._messages if "earned" in m.get("content", "")]
+        assert len(reward_msgs) == 1
+        assert "📈" in reward_msgs[0]["content"]
+        assert "credits" in reward_msgs[0]["content"]
+        assert reward_msgs[0]["role"] == "user"
+
+        db.close()
+
+    def test_single_agent_no_notification_when_no_credits(self):
+        """No notification when no valid files are in /env/outgoing/."""
+        sandbox = self._make_fake_sandbox({})
+
+        settings = Settings()
+        db = LoggingDB(":memory:")
+        db.connect()
+        db.log_run_start("test-no-reward", "{}")
+
+        economy = CreditEconomy(settings)
+        validator = FileValidator(settings)
+        registry = ToolRegistry()
+
+        orch = AgentOrchestrator(
+            settings=settings,
+            llm_client=None,
+            tool_parser=None,
+            tool_registry=registry,
+            credit_economy=economy,
+            sandbox_manager=sandbox,
+            logging_db=db,
+            file_validator=validator,
+        )
+        orch._container_id = "fake-test"
+        orch._messages = []
+        orch._turn = 1
+
+        orch._validate_outputs("test-no-reward")
+
+        reward_msgs = [m for m in orch._messages if "earned" in m.get("content", "")]
+        assert len(reward_msgs) == 0
+
+        db.close()
+
+    def test_multi_agent_reward_notification_injected(self):
+        """Multi-agent: reward notification injected into correct agent's messages."""
+        csv_content = "name,age,email\nAlice,30,a@b.com\nBob,25,c@d.com\n"
+        sandbox = self._make_fake_sandbox({"data_001_csv_easy.csv": csv_content})
+
+        settings = Settings()
+        settings.multi_agent_enabled = True
+        settings.multi_agent_count = 2
+
+        db = LoggingDB(":memory:")
+        db.connect()
+        db.log_run_start("test-multi-reward", "{}")
+
+        shared_econ = SharedEconomy(settings, ["agent-0", "agent-1"])
+        validator = FileValidator(settings)
+
+        orch = MultiAgentOrchestrator(
+            settings=settings,
+            shared_economy=shared_econ,
+            sandbox_manager=sandbox,
+            logging_db=db,
+            file_validator=validator,
+            agent_names=["agent-0", "agent-1"],
+        )
+        orch._agent_containers = {"agent-0": "fake-agent-0", "agent-1": "fake-agent-1"}
+
+        initial = shared_econ.get_agent_economy("agent-0").get_balance()
+        orch._validate_agent_outputs("test-multi-reward", "agent-0", 1, "fake-agent-0")
+
+        assert shared_econ.get_agent_economy("agent-0").get_balance() > initial
+
+        a0_reward = [
+            m
+            for m in orch._agent_messages["agent-0"]
+            if "earned" in m.get("content", "")
+        ]
+        a1_reward = [
+            m
+            for m in orch._agent_messages["agent-1"]
+            if "earned" in m.get("content", "")
+        ]
+        assert len(a0_reward) == 1
+        assert len(a1_reward) == 0
+        assert "📈" in a0_reward[0]["content"]
+
+        db.close()
+
+
+PromptManager = import_module("petri_dish.prompt").PromptManager
+
+
+class TestEnvDiscoverability:
+    """Tests for the /env/ discoverability hint in prompts."""
+
+    def test_single_agent_prompt_has_env_hint(self):
+        """Single-agent prompt mentions /env/ structure."""
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            mod_path = f.name
+
+        try:
+            pm = PromptManager(modifications_path=mod_path)
+            prompt = pm.build_system_prompt(
+                tools=[{"name": "file_list", "description": "List files"}],
+                tool_costs={"file_list": 0.0},
+                balance=100.0,
+                state_summary="Turn: 1",
+                has_persistent_memory=False,
+                agent_state="active",
+                starvation_remaining=7,
+            )
+            assert "/env/" in prompt
+            assert "discover" in prompt.lower()
+        finally:
+            os.unlink(mod_path)
+
+    def test_multi_agent_prompt_has_env_hint(self):
+        """Multi-agent prompt mentions /env/ structure."""
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            mod_path = f.name
+
+        try:
+            pm = PromptManager(modifications_path=mod_path)
+            prompt = pm.build_multi_agent_system_prompt(
+                agent_id="agent-0",
+                tools=[{"name": "file_list", "description": "List files"}],
+                tool_costs={"file_list": 0.0},
+                balance=100.0,
+                agent_state="active",
+                starvation_remaining=7,
+                agent_summaries=[],
+                actions_per_turn=4,
+            )
+            assert "/env/" in prompt
+            assert "discover" in prompt.lower()
+        finally:
+            os.unlink(mod_path)
