@@ -13,7 +13,7 @@ from petri_dish.config import Settings
 from petri_dish.context_manager import ContextManager
 from petri_dish.degradation import DegradationManager
 from petri_dish.ecology import ResourceEcology
-from petri_dish.economy import CreditEconomy, SharedEconomy
+from petri_dish.economy import AgentReserve, SharedReserve
 from petri_dish.llm_client import OllamaClient
 from petri_dish.logging_db import LoggingDB
 from petri_dish.null_model import NullModel
@@ -143,7 +143,7 @@ async def _run_experiment_async(
             )
         )
 
-    credit_economy = CreditEconomy(settings=settings)
+    agent_reserve = AgentReserve(settings=settings)
     logging_db = LoggingDB(db_path=_resolve_db_path(resolved_run_id))
     tool_parser = ToolCallParser()
     tool_registry = get_all_tools(settings=settings)
@@ -160,7 +160,7 @@ async def _run_experiment_async(
         settings=settings,
         tool_parser=tool_parser,
         tool_registry=tool_registry,
-        credit_economy=credit_economy,
+        agent_reserve=agent_reserve,
         sandbox_manager=sandbox_manager,
         logging_db=logging_db,
         snapshot_interval_turns=settings.context_summary_interval_turns,
@@ -205,8 +205,8 @@ async def _run_experiment_async(
                 "final_balance": result.final_balance,
             }
         ),
-        credits_before=result.final_balance,
-        credits_after=result.final_balance,
+        zod_before=result.final_balance,
+        zod_after=result.final_balance,
         duration_ms=0,
     )
 
@@ -240,7 +240,7 @@ async def _run_multi_agent_async(
     ]
     logging_db = LoggingDB(db_path=_resolve_db_path(run_id))
     sandbox_manager = SandboxManager()
-    shared_economy = SharedEconomy(settings=settings, agent_ids=agent_names)
+    shared_economy = SharedReserve(settings=settings, agent_ids=agent_names)
     file_validator = FileValidator(settings=settings)
     resource_ecology = ResourceEcology(settings=settings)
 

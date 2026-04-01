@@ -15,8 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 Settings = import_module("petri_dish.config").Settings
 AgentState = import_module("petri_dish.economy").AgentState
-CreditEconomy = import_module("petri_dish.economy").CreditEconomy
-SharedEconomy = import_module("petri_dish.economy").SharedEconomy
+AgentReserve = import_module("petri_dish.economy").AgentReserve
+SharedReserve = import_module("petri_dish.economy").SharedReserve
 LoggingDB = import_module("petri_dish.logging_db").LoggingDB
 MultiAgentOrchestrator = import_module("petri_dish.orchestrator").MultiAgentOrchestrator
 PromptManager = import_module("petri_dish.prompt").PromptManager
@@ -91,7 +91,7 @@ def _build_multi_agent(
     names = agent_names or ["agent-a", "agent-b"]
     sandbox = FakeSandboxManager()
     logging_db = LoggingDB(":memory:")
-    shared_economy = SharedEconomy(settings=settings, agent_ids=names)
+    shared_economy = SharedReserve(settings=settings, agent_ids=names)
     llm_clients = {
         aid: FakeOllamaClient((llm_responses or {}).get(aid, [])) for aid in names
     }
@@ -107,46 +107,46 @@ def _build_multi_agent(
     return orchestrator, logging_db, sandbox, shared_economy
 
 
-class TestSharedEconomy:
+class TestSharedReserve:
     def test_init_creates_per_agent_economies(self):
-        settings = Settings(initial_balance=123.0, multi_agent_count=2)
-        economy = SharedEconomy(settings=settings, agent_ids=["a1", "a2"])
+        settings = Settings(initial_zod=123.0, multi_agent_count=2)
+        economy = SharedReserve(settings=settings, agent_ids=["a1", "a2"])
 
         assert set(economy.get_agent_ids()) == {"a1", "a2"}
-        assert isinstance(economy.get_agent_economy("a1"), CreditEconomy)
-        assert isinstance(economy.get_agent_economy("a2"), CreditEconomy)
+        assert isinstance(economy.get_agent_economy("a1"), AgentReserve)
+        assert isinstance(economy.get_agent_economy("a2"), AgentReserve)
         assert economy.get_agent_balance("a1") == pytest.approx(123.0)
         assert economy.get_agent_balance("a2") == pytest.approx(123.0)
 
-    def test_debit_credits_per_agent(self):
-        settings = Settings(initial_balance=10.0, burn_rate_per_turn=1.5)
-        economy = SharedEconomy(settings=settings, agent_ids=["a1", "a2"])
+    def test_consume_zod_per_agent(self):
+        settings = Settings(initial_zod=10.0, decay_rate_per_turn=1.5)
+        economy = SharedReserve(settings=settings, agent_ids=["a1", "a2"])
 
-        economy.debit("a1", turns=2)
-        economy.debit("a2", turns=1)
+        economy.consume("a1", turns=2)
+        economy.consume("a2", turns=1)
 
         assert economy.get_agent_balance("a1") == pytest.approx(7.0)
         assert economy.get_agent_balance("a2") == pytest.approx(8.5)
 
-    def test_credit_with_debt_garnishing(self):
+    def test_grant_with_debt_garnishing(self):
         settings = Settings(multi_agent_debt_garnish_pct=0.5)
-        economy = SharedEconomy(settings=settings, agent_ids=["a1"])
+        economy = SharedReserve(settings=settings, agent_ids=["a1"])
         economy.agent_debt["a1"] = 20.0
 
         before = economy.get_agent_balance("a1")
-        economy.credit("a1", 50.0)
+        economy.grant("a1", 50.0)
 
         assert economy.get_agent_balance("a1") == pytest.approx(before + 30.0)
         assert economy.get_agent_debt("a1") == pytest.approx(0.0)
         assert economy.get_common_pool() == pytest.approx(20.0)
 
-    def test_handle_death_burns_and_salvages(self):
+    def test_handle_death_decays_and_salvages(self):
         settings = Settings(
-            initial_balance=100.0,
-            multi_agent_burn_pct=0.3,
+            initial_zod=100.0,
+            multi_agent_decay_pct=0.3,
             multi_agent_salvage_pct=0.3,
         )
-        economy = SharedEconomy(settings=settings, agent_ids=["a1"])
+        economy = SharedReserve(settings=settings, agent_ids=["a1"])
 
         salvage = economy.handle_death("a1")
 
@@ -156,13 +156,13 @@ class TestSharedEconomy:
 
     def test_handle_death_at_zero_balance_creates_debt(self):
         settings = Settings(
-            initial_balance=100.0,
-            multi_agent_burn_pct=0.3,
+            initial_zod=100.0,
+            multi_agent_decay_pct=0.3,
             multi_agent_salvage_pct=0.3,
         )
-        economy = SharedEconomy(settings=settings, agent_ids=["a1"])
+        economy = SharedReserve(settings=settings, agent_ids=["a1"])
 
-        economy.debit("a1", turns=1000)
+        economy.consume("a1", turns=1000)
         assert economy.get_agent_balance("a1") <= 0
 
         salvage = economy.handle_death("a1")
@@ -173,16 +173,16 @@ class TestSharedEconomy:
 
     def test_handle_death_uses_lifetime_earned_as_penalty_base(self):
         settings = Settings(
-            initial_balance=100.0,
-            multi_agent_burn_pct=0.3,
+            initial_zod=100.0,
+            multi_agent_decay_pct=0.3,
             multi_agent_salvage_pct=0.3,
         )
-        economy = SharedEconomy(settings=settings, agent_ids=["a1"])
+        economy = SharedReserve(settings=settings, agent_ids=["a1"])
 
-        economy.credit("a1", 200.0)
-        economy.debit("a1", turns=3000)
+        economy.grant("a1", 200.0)
+        economy.consume("a1", turns=3000)
         assert economy.get_agent_balance("a1") <= 0
-        assert economy.get_agent_economy("a1").lifetime_credits_earned == 300.0
+        assert economy.get_agent_economy("a1").lifetime_zod_earned == 300.0
 
         salvage = economy.handle_death("a1")
 
@@ -190,14 +190,14 @@ class TestSharedEconomy:
         assert economy.get_common_pool() == pytest.approx(90.0)
 
     def test_handle_death_sets_state_to_dead(self):
-        economy = SharedEconomy(settings=Settings(), agent_ids=["a1"])
+        economy = SharedReserve(settings=Settings(), agent_ids=["a1"])
 
         economy.handle_death("a1")
 
         assert economy.get_agent_state("a1") == AgentState.DEAD
 
     def test_tick_spectator_increments_counter(self):
-        economy = SharedEconomy(
+        economy = SharedReserve(
             settings=Settings(multi_agent_spectator_rounds=3), agent_ids=["a1"]
         )
         economy.get_agent_economy("a1").state = AgentState.DEAD
@@ -207,7 +207,7 @@ class TestSharedEconomy:
         assert economy.spectator_counters["a1"] == 1
 
     def test_tick_spectator_returns_true_when_cooldown_reached(self):
-        economy = SharedEconomy(
+        economy = SharedReserve(
             settings=Settings(multi_agent_spectator_rounds=2), agent_ids=["a1"]
         )
         economy.get_agent_economy("a1").state = AgentState.DEAD
@@ -219,7 +219,7 @@ class TestSharedEconomy:
         settings = Settings(
             multi_agent_spectator_rounds=2, multi_agent_reentry_fee=20.0
         )
-        economy = SharedEconomy(settings=settings, agent_ids=["a1"])
+        economy = SharedReserve(settings=settings, agent_ids=["a1"])
         economy.get_agent_economy("a1").state = AgentState.DEAD
         economy.common_pool = 100.0
         economy.spectator_counters["a1"] = 1
@@ -230,7 +230,7 @@ class TestSharedEconomy:
         settings = Settings(
             multi_agent_spectator_rounds=2, multi_agent_reentry_fee=20.0
         )
-        economy = SharedEconomy(settings=settings, agent_ids=["a1"])
+        economy = SharedReserve(settings=settings, agent_ids=["a1"])
         economy.get_agent_economy("a1").state = AgentState.DEAD
         economy.common_pool = 50.0
         economy.spectator_counters["a1"] = 2
@@ -246,7 +246,7 @@ class TestSharedEconomy:
         settings = Settings(
             multi_agent_spectator_rounds=1, multi_agent_reentry_fee=20.0
         )
-        economy = SharedEconomy(settings=settings, agent_ids=["a1"])
+        economy = SharedReserve(settings=settings, agent_ids=["a1"])
         economy.get_agent_economy("a1").state = AgentState.DEAD
         economy.common_pool = 10.0
         economy.spectator_counters["a1"] = 1
@@ -254,13 +254,13 @@ class TestSharedEconomy:
         assert economy.reentry("a1") is False
 
     def test_get_living_agents_excludes_dead(self):
-        economy = SharedEconomy(settings=Settings(), agent_ids=["a1", "a2", "a3"])
+        economy = SharedReserve(settings=Settings(), agent_ids=["a1", "a2", "a3"])
         economy.get_agent_economy("a2").state = AgentState.DEAD
 
         assert set(economy.get_living_agents()) == {"a1", "a3"}
 
     def test_get_agent_summaries_structure(self):
-        economy = SharedEconomy(settings=Settings(), agent_ids=["a1", "a2"])
+        economy = SharedReserve(settings=Settings(), agent_ids=["a1", "a2"])
 
         summaries = economy.get_agent_summaries()
 
@@ -360,9 +360,9 @@ class TestMultiAgentOrchestrator:
     def test_round_robin_both_agents_get_turns(self):
         settings = Settings(
             max_turns=2,
-            burn_rate_per_turn=0.0,
+            decay_rate_per_turn=0.0,
             multi_agent_actions_per_turn=4,
-            initial_balance=10.0,
+            initial_zod=10.0,
         )
         responses = {
             "agent-a": [("a-turn-1", []), ("a-turn-2", [])],
@@ -383,9 +383,9 @@ class TestMultiAgentOrchestrator:
     def test_actions_per_turn_cap(self):
         settings = Settings(
             max_turns=1,
-            burn_rate_per_turn=0.0,
+            decay_rate_per_turn=0.0,
             multi_agent_actions_per_turn=4,
-            initial_balance=10.0,
+            initial_zod=10.0,
         )
         calls = [{"name": "check_balance", "arguments": {}} for _ in range(6)]
         responses = {"agent-a": [("do many actions", calls)]}
@@ -402,7 +402,7 @@ class TestMultiAgentOrchestrator:
         assert len(check_balance_calls) == 4
 
     def test_dead_agent_skipped(self):
-        settings = Settings(max_turns=2, burn_rate_per_turn=0.0, initial_balance=10.0)
+        settings = Settings(max_turns=2, decay_rate_per_turn=0.0, initial_zod=10.0)
         responses = {
             "agent-a": [("a", []), ("a", [])],
             "agent-b": [("b", []), ("b", [])],
@@ -422,10 +422,10 @@ class TestMultiAgentOrchestrator:
     def test_death_salvage_to_common_pool(self):
         settings = Settings(
             max_turns=1,
-            burn_rate_per_turn=0.0,
-            initial_balance=10.0,
+            decay_rate_per_turn=0.0,
+            initial_zod=10.0,
             starvation_turns=1,
-            multi_agent_burn_pct=0.3,
+            multi_agent_decay_pct=0.3,
             multi_agent_salvage_pct=0.3,
         )
         responses = {
@@ -445,7 +445,7 @@ class TestMultiAgentOrchestrator:
         assert result.common_pool == pytest.approx(3.0)
 
     def test_all_agents_dead_terminates(self):
-        settings = Settings(max_turns=5, burn_rate_per_turn=0.0, initial_balance=10.0)
+        settings = Settings(max_turns=5, decay_rate_per_turn=0.0, initial_zod=10.0)
         orchestrator, _, _, shared = _build_multi_agent(
             settings,
             llm_responses={},
@@ -459,7 +459,7 @@ class TestMultiAgentOrchestrator:
         assert result.termination_reason == "all_agents_dead"
 
     def test_max_rounds_terminates(self):
-        settings = Settings(max_turns=1, burn_rate_per_turn=0.0, initial_balance=10.0)
+        settings = Settings(max_turns=1, decay_rate_per_turn=0.0, initial_zod=10.0)
         responses = {"agent-a": [("a", [])]}
         orchestrator, _, _, _ = _build_multi_agent(
             settings,
@@ -473,7 +473,7 @@ class TestMultiAgentOrchestrator:
         assert result.termination_reason == "max_rounds_reached"
 
     def test_logging_has_agent_id(self):
-        settings = Settings(max_turns=1, burn_rate_per_turn=0.0, initial_balance=10.0)
+        settings = Settings(max_turns=1, decay_rate_per_turn=0.0, initial_zod=10.0)
         responses = {
             "agent-a": [("a", [{"name": "check_balance", "arguments": {}}])],
             "agent-b": [("b", [{"name": "check_balance", "arguments": {}}])],
@@ -494,8 +494,8 @@ class TestMultiAgentOrchestrator:
     def test_stripped_transition_logged_per_agent(self):
         settings = Settings(
             max_turns=1,
-            initial_balance=0.0,
-            burn_rate_per_turn=0.0,
+            initial_zod=0.0,
+            decay_rate_per_turn=0.0,
             starvation_turns=3,
         )
         responses = {

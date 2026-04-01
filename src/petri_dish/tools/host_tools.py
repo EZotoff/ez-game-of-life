@@ -13,7 +13,7 @@ MAX_RESPONSE_BYTES = 10 * 1024  # 10KB truncation limit
 
 
 def check_balance(**kwargs: object) -> str:
-    """Query current credit balance.
+    """Query current zod balance.
 
     This is a placeholder — the orchestrator injects the actual balance
     at call time. Returns a stub here; real implementation wired in T8.

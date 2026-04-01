@@ -18,15 +18,15 @@ Settings = import_module("petri_dish.config").Settings
 
 
 class TestLiveRunBugs:
-    def test_per_agent_balance_after_in_credit_transactions(self):
-        """Test 1: Verify log_credit scopes balance_after by agent_id."""
+    def test_per_agent_balance_after_in_zod_transactions(self):
+        """Test 1: Verify log_zod_transaction scopes balance_after by agent_id."""
         db = LoggingDB(":memory:")
         db.connect()
 
         db.log_run_start("test", "{}")
-        db.log_credit("test", 100.0, "initial_balance", agent_id="agent-0")
-        db.log_credit("test", 200.0, "initial_balance", agent_id="agent-1")
-        db.log_credit("test", -10.0, "tool_cost", agent_id="agent-0")
+        db.log_zod_transaction("test", 100.0, "initial_zod", agent_id="agent-0")
+        db.log_zod_transaction("test", 200.0, "initial_zod", agent_id="agent-1")
+        db.log_zod_transaction("test", -10.0, "tool_cost", agent_id="agent-0")
 
         history = db.get_balance_history("test")
         agent0_balances = [h for h in history if h.get("agent_id") == "agent-0"]
@@ -137,14 +137,14 @@ class TestLiveRunBugs:
 
 
 AgentOrchestrator = import_module("petri_dish.orchestrator").AgentOrchestrator
-CreditEconomy = import_module("petri_dish.economy").CreditEconomy
-SharedEconomy = import_module("petri_dish.economy").SharedEconomy
+AgentReserve = import_module("petri_dish.economy").AgentReserve
+SharedReserve = import_module("petri_dish.economy").SharedReserve
 FileValidator = import_module("petri_dish.validators").FileValidator
 ToolRegistry = import_module("petri_dish.tools.registry").ToolRegistry
 
 
 class TestRewardNotifications:
-    """Tests for deterministic reward notifications injected after FileValidator credits."""
+    """Tests for deterministic reward notifications injected after FileValidator zod rewards."""
 
     def _make_fake_sandbox(self, outgoing_files: dict[str, str] | None = None):
         """Create a FakeSandboxManager that returns specified files from /env/outgoing/."""
@@ -188,7 +188,7 @@ class TestRewardNotifications:
         return FakeSandbox()
 
     def test_single_agent_reward_notification_injected(self):
-        """When FileValidator awards credits, a notification message is injected."""
+        """When FileValidator awards zod, a notification message is injected."""
         csv_content = "name,age,email\nAlice,30,a@b.com\nBob,25,c@d.com\n"
         sandbox = self._make_fake_sandbox({"data_001_csv_easy.csv": csv_content})
 
@@ -197,7 +197,7 @@ class TestRewardNotifications:
         db.connect()
         db.log_run_start("test-reward", "{}")
 
-        economy = CreditEconomy(settings)
+        economy = AgentReserve(settings)
         validator = FileValidator(settings)
         registry = ToolRegistry()
 
@@ -206,7 +206,7 @@ class TestRewardNotifications:
             llm_client=None,
             tool_parser=None,
             tool_registry=registry,
-            credit_economy=economy,
+            agent_reserve=economy,
             sandbox_manager=sandbox,
             logging_db=db,
             file_validator=validator,
@@ -215,20 +215,20 @@ class TestRewardNotifications:
         orch._messages = []
         orch._turn = 1
 
-        initial_balance = economy.get_balance()
+        initial_zod = economy.get_balance()
         orch._validate_outputs("test-reward")
 
-        assert economy.get_balance() > initial_balance
+        assert economy.get_balance() > initial_zod
 
         reward_msgs = [m for m in orch._messages if "earned" in m.get("content", "")]
         assert len(reward_msgs) == 1
         assert "📈" in reward_msgs[0]["content"]
-        assert "credits" in reward_msgs[0]["content"]
+        assert "zod" in reward_msgs[0]["content"]
         assert reward_msgs[0]["role"] == "user"
 
         db.close()
 
-    def test_single_agent_no_notification_when_no_credits(self):
+    def test_single_agent_no_notification_when_no_zod(self):
         """No notification when no valid files are in /env/outgoing/."""
         sandbox = self._make_fake_sandbox({})
 
@@ -237,7 +237,7 @@ class TestRewardNotifications:
         db.connect()
         db.log_run_start("test-no-reward", "{}")
 
-        economy = CreditEconomy(settings)
+        economy = AgentReserve(settings)
         validator = FileValidator(settings)
         registry = ToolRegistry()
 
@@ -246,7 +246,7 @@ class TestRewardNotifications:
             llm_client=None,
             tool_parser=None,
             tool_registry=registry,
-            credit_economy=economy,
+            agent_reserve=economy,
             sandbox_manager=sandbox,
             logging_db=db,
             file_validator=validator,
@@ -275,7 +275,7 @@ class TestRewardNotifications:
         db.connect()
         db.log_run_start("test-multi-reward", "{}")
 
-        shared_econ = SharedEconomy(settings, ["agent-0", "agent-1"])
+        shared_econ = SharedReserve(settings, ["agent-0", "agent-1"])
         validator = FileValidator(settings)
 
         orch = MultiAgentOrchestrator(

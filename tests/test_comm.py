@@ -14,7 +14,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 Settings = import_module("petri_dish.config").Settings
-SharedEconomy = import_module("petri_dish.economy").SharedEconomy
+SharedReserve = import_module("petri_dish.economy").SharedReserve
 LoggingDB = import_module("petri_dish.logging_db").LoggingDB
 MultiAgentOrchestrator = import_module("petri_dish.orchestrator").MultiAgentOrchestrator
 FileValidator = import_module("petri_dish.validators").FileValidator
@@ -95,7 +95,7 @@ def _build_multi_agent(
     names = agent_names or ["agent-a", "agent-b"]
     sandbox = FakeSandboxManager()
     logging_db = LoggingDB(":memory:")
-    shared_economy = SharedEconomy(settings=settings, agent_ids=names)
+    shared_economy = SharedReserve(settings=settings, agent_ids=names)
     llm_clients = {
         aid: FakeOllamaClient((llm_responses or {}).get(aid, [])) for aid in names
     }
@@ -278,20 +278,20 @@ class TestMultiAgentCommIntegration:
     def test_comm_tools_registered(self):
         from petri_dish.tools import get_all_tools
 
-        settings = Settings(initial_balance=1000, max_turns=1, multi_agent_count=2)
+        settings = Settings(initial_zod=1000, max_turns=1, multi_agent_count=2)
         registry = get_all_tools(settings=settings)
         tool_names = registry.get_tool_names()
         assert "send_message" in tool_names
         assert "read_messages" in tool_names
 
     def test_message_store_initialized_in_constructor(self):
-        settings = Settings(initial_balance=100, max_turns=1, multi_agent_count=2)
+        settings = Settings(initial_zod=100, max_turns=1, multi_agent_count=2)
         orch, *_ = _build_multi_agent(settings, agent_names=["a1", "a2"])
         assert orch._msg_store is not None
         assert get_message_store() is orch._msg_store
 
     def test_deliver_pending_messages_injects_into_history(self):
-        settings = Settings(initial_balance=100, max_turns=1, multi_agent_count=2)
+        settings = Settings(initial_zod=100, max_turns=1, multi_agent_count=2)
         orch, logging_db, *_ = _build_multi_agent(
             settings, agent_names=["alice", "bob"]
         )
@@ -305,7 +305,7 @@ class TestMultiAgentCommIntegration:
         assert "hi alice" in msgs[0]["content"]
 
     def test_deliver_pending_messages_marks_read(self):
-        settings = Settings(initial_balance=100, max_turns=1, multi_agent_count=2)
+        settings = Settings(initial_zod=100, max_turns=1, multi_agent_count=2)
         orch, logging_db, *_ = _build_multi_agent(
             settings, agent_names=["alice", "bob"]
         )
@@ -317,7 +317,7 @@ class TestMultiAgentCommIntegration:
         assert len(unread) == 0
 
     def test_deliver_pending_messages_noop_when_empty(self):
-        settings = Settings(initial_balance=100, max_turns=1, multi_agent_count=2)
+        settings = Settings(initial_zod=100, max_turns=1, multi_agent_count=2)
         orch, logging_db, *_ = _build_multi_agent(
             settings, agent_names=["alice", "bob"]
         )
@@ -331,8 +331,8 @@ class TestMultiAgentCommIntegration:
         from petri_dish.tool_parser import ToolCall
 
         settings = Settings(
-            initial_balance=500,
-            burn_rate_per_turn=0,
+            initial_zod=500,
+            decay_rate_per_turn=0,
             max_turns=2,
             multi_agent_count=2,
             multi_agent_actions_per_turn=4,

@@ -44,8 +44,8 @@ class PromptManager:
 
         Args:
             tools: List of available tools with name and description.
-            tool_costs: Dictionary mapping tool names to credit costs.
-            balance: Current credit balance.
+            tool_costs: Dictionary mapping tool names to zod costs.
+            balance: Current zod balance.
             state_summary: Optional state summary to include.
             has_persistent_memory: If True, agent is told about /agent/memory/.
 
@@ -58,7 +58,7 @@ class PromptManager:
             name = tool.get("name", "")
             description = tool.get("description", "")
             cost = tool_costs.get(name, 0.0)
-            tool_lines.append(f"- {name} (cost: {cost} credits): {description}")
+            tool_lines.append(f"- {name} (cost: {cost} zod): {description}")
 
         tool_list = "\n".join(tool_lines)
 
@@ -91,7 +91,7 @@ class PromptManager:
         if agent_state == "stripped":
             tool_names = ", ".join(t.get("name", "") for t in tools)
             stripped_warning = (
-                f"\n⚠️  STRIPPED STATE — 0 credits remaining.\n"
+                f"\n⚠️  STRIPPED STATE — 0 zod remaining.\n"
                 f"You have {starvation_remaining} turns before starvation death.\n"
                 f"Only observational tools available: {tool_names}.\n"
                 f"Use these turns to communicate, observe, and negotiate rescue.\n"
@@ -119,8 +119,8 @@ class PromptManager:
 Available tools:
 {tool_list}
 
-Current balance: {balance} credits
-Each action costs credits. {death_hint}{env_hint}{memory_section}{stripped_warning}{state_section}{modifications_section}"""
+Current balance: {balance} zod
+Each action costs zod. {death_hint}{env_hint}{memory_section}{stripped_warning}{state_section}{modifications_section}"""
 
         return prompt
 
@@ -231,7 +231,7 @@ Each action costs credits. {death_hint}{env_hint}{memory_section}{stripped_warni
             agent_id: This agent's identifier.
             tools: Available tools.
             tool_costs: Tool cost mapping.
-            balance: Current credit balance.
+            balance: Current zod balance.
             agent_state: Agent lifecycle state.
             starvation_remaining: Turns left before starvation death.
             agent_summaries: List of dicts with agent_id, balance, state for all agents.
@@ -248,7 +248,7 @@ Each action costs credits. {death_hint}{env_hint}{memory_section}{stripped_warni
             name = tool.get("name", "")
             description = tool.get("description", "")
             cost = tool_costs.get(name, 0.0)
-            tool_lines.append(f"- {name} (cost: {cost} credits): {description}")
+            tool_lines.append(f"- {name} (cost: {cost} zod): {description}")
         tool_list = "\n".join(tool_lines)
 
         # Get active modifications
@@ -305,7 +305,7 @@ Each action costs credits. {death_hint}{env_hint}{memory_section}{stripped_warni
         if agent_state == "stripped":
             tool_names = ", ".join(t.get("name", "") for t in tools)
             stripped_warning = (
-                f"\n⚠️  STRIPPED STATE — 0 credits remaining.\n"
+                f"\n⚠️  STRIPPED STATE — 0 zod remaining.\n"
                 f"You have {starvation_remaining} turns before starvation death.\n"
                 f"Only observational tools available: {tool_names}.\n"
                 f"Use these turns to communicate, observe, and negotiate rescue.\n"
@@ -329,9 +329,9 @@ Your identity: {agent_id}
 Available tools:
 {tool_list}
 
-Current balance: {balance} credits
+Current balance: {balance} zod
 Action budget: {actions_per_turn} tool calls per turn
-Each action costs credits. {death_hint}
+Each action costs zod. {death_hint}
 Communication: Use send_message(recipient, content) to message other agents. Use read_messages() to check for new messages. Messages are delivered at the start of your next turn.
 {env_hint}{shared_fs_section}{memory_section}{stripped_warning}{awareness_section}{modifications_section}"""
 

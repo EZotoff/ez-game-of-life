@@ -11,7 +11,7 @@ from typing import Any, Optional
 from dataclasses import dataclass
 
 from petri_dish.config import Settings
-from petri_dish.economy import CreditEconomy
+from petri_dish.economy import AgentReserve
 
 logger = logging.getLogger(__name__)
 
@@ -107,12 +107,12 @@ class ContextManager:
 
     def build_state_summary(
         self,
-        economy: CreditEconomy,
+        economy: AgentReserve,
         turn: int,
         recent_actions: list[dict[str, Any]],
         files_seen: list[str],
         files_processed: list[str],
-        credits_earned: float,
+        zod_earned: float,
     ) -> str:
         """Build a compact state summary for system prompt injection.
 
@@ -121,15 +121,15 @@ class ContextManager:
         - Last 3 tool results
         - Files in /env/incoming/
         - Files processed
-        - Total credits earned
+        - Total zod earned
 
         Args:
-            economy: CreditEconomy instance for balance info.
+            economy: AgentReserve instance for balance info.
             turn: Current turn number.
             recent_actions: List of recent tool actions (most recent first).
             files_seen: List of files currently in /env/incoming/.
             files_processed: List of files that have been processed.
-            credits_earned: Total credits earned from file processing.
+            zod_earned: Total zod earned from file processing.
 
         Returns:
             Compact state summary string.
@@ -155,9 +155,9 @@ class ContextManager:
         summary_lines = [
             "=== AGENT STATE SUMMARY ===",
             f"Turn: {turn}",
-            f"Balance: {balance:.2f} credits",
+            f"Balance: {balance:.2f} zod",
             f"Degradation level: {economy.get_degradation_level()}",
-            f"Credits earned total: {credits_earned:.2f}",
+            f"Zod earned total: {zod_earned:.2f}",
             "",
             "Recent actions (last 3):",
         ]

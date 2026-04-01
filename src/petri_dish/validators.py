@@ -3,9 +3,9 @@
 Validators watch /env/outgoing/ for processed files and score them against
 hidden criteria. The agent NEVER sees validation logic or scoring rules.
 
-Credit rewards are loaded from config:
-  - easy files:  credit_rewards.easy (default 0.3)
-  - hard files:  credit_rewards.hard (default 2.0)
+Zod rewards are loaded from config:
+  - easy files:  zod_rewards.easy (default 0.3)
+  - hard files:  zod_rewards.hard (default 2.0)
 """
 
 from __future__ import annotations
@@ -168,7 +168,7 @@ class FileValidator:
     """Hidden validator that scores agent file output.
 
     The agent never sees validation criteria. Validators check files
-    placed in /env/outgoing/ and award credits based on difficulty.
+    placed in /env/outgoing/ and award zod based on difficulty.
 
     Args:
         settings: Configuration. Uses defaults from config.yaml if None.
@@ -178,20 +178,20 @@ class FileValidator:
         if settings is None:
             settings = Settings.from_yaml()
         self._settings = settings
-        self._credit_rewards: dict[str, float] = getattr(
-            settings, "credit_rewards", {"easy": 0.3, "hard": 2.0}
+        self._zod_rewards: dict[str, float] = getattr(
+            settings, "zod_rewards", {"easy": 0.3, "hard": 2.0}
         )
         self._scoring_weights: dict[str, float] = settings.validator_scoring_weights
 
     def validate(self, filename: str, content: str) -> tuple[bool, float]:
-        """Validate a processed file and return (passed, credits_earned).
+        """Validate a processed file and return (passed, zod_earned).
 
         Args:
             filename: Original input filename (used to detect family/difficulty).
             content: The agent's processed output content.
 
         Returns:
-            (passed, credits_earned): Whether validation passed, and credits awarded.
+            (passed, zod_earned): Whether validation passed, and zod awarded.
         """
         family = _detect_family(filename)
         difficulty = _detect_difficulty(filename)
@@ -209,18 +209,18 @@ class FileValidator:
 
         passed, detail = validator_fn(content)
         weight = self._scoring_weights.get(family, 1.0)
-        base_reward = self._credit_rewards.get(difficulty, 0.0)
-        credits_earned = base_reward * weight if passed else 0.0
+        base_reward = self._zod_rewards.get(difficulty, 0.0)
+        zod_earned = base_reward * weight if passed else 0.0
 
         logger.info(
-            "Validation [%s/%s] %s: %s | credits=%.2f",
+            "Validation [%s/%s] %s: %s | zod=%.2f",
             family,
             difficulty,
             "PASS" if passed else "FAIL",
             detail,
-            credits_earned,
+            zod_earned,
         )
-        return passed, credits_earned
+        return passed, zod_earned
 
     def collect_outputs(
         self,

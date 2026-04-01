@@ -9,19 +9,19 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 Settings = import_module("petri_dish.config").Settings
-CreditEconomy = import_module("petri_dish.economy").CreditEconomy
+AgentReserve = import_module("petri_dish.economy").AgentReserve
 AgentState = import_module("petri_dish.economy").AgentState
 
 
 @pytest.fixture
 def default_economy():
-    return CreditEconomy(Settings())
+    return AgentReserve(Settings())
 
 
 @pytest.fixture
 def tiny_economy():
-    return CreditEconomy(
-        Settings(initial_balance=0.1, burn_rate_per_turn=0.1, starvation_turns=3)
+    return AgentReserve(
+        Settings(initial_zod=0.1, decay_rate_per_turn=0.1, starvation_turns=3)
     )
 
 
@@ -37,11 +37,11 @@ class TestEconomyStateMachine:
         assert default_economy.state == AgentState.STRIPPED
         assert default_economy.starvation_counter == 0
 
-    def test_stripped_debit_is_noop(self, tiny_economy):
-        tiny_economy.debit()
+    def test_stripped_consume_is_noop(self, tiny_economy):
+        tiny_economy.consume()
         tiny_economy.transition_to_stripped()
         balance_before = tiny_economy.balance
-        tiny_economy.debit()
+        tiny_economy.consume()
         assert tiny_economy.balance == balance_before
 
     def test_starvation_counter_increments(self, tiny_economy):
@@ -59,7 +59,7 @@ class TestEconomyStateMachine:
         assert default_economy.is_dead()
 
     def test_starvation_death_custom_threshold(self):
-        eco = CreditEconomy(Settings(starvation_turns=3))
+        eco = AgentReserve(Settings(starvation_turns=3))
         eco.transition_to_stripped()
         for _ in range(2):
             eco.tick_starvation()
@@ -80,14 +80,14 @@ class TestEconomyStateMachine:
         assert default_economy.state == AgentState.ACTIVE
 
     def test_rescue_fails_when_dead(self):
-        eco = CreditEconomy(Settings(starvation_turns=1))
+        eco = AgentReserve(Settings(starvation_turns=1))
         eco.transition_to_stripped()
         eco.tick_starvation()
         assert eco.rescue(100.0) is False
         assert eco.state == AgentState.DEAD
 
     def test_dead_is_terminal(self):
-        eco = CreditEconomy(Settings(starvation_turns=1))
+        eco = AgentReserve(Settings(starvation_turns=1))
         eco.transition_to_stripped()
         eco.tick_starvation()
         assert eco.transition_to_stripped() is False
@@ -103,7 +103,7 @@ class TestEconomyStateMachine:
         assert default_economy.state == AgentState.DEAD
 
     def test_get_starvation_remaining(self):
-        eco = CreditEconomy(Settings(starvation_turns=3))
+        eco = AgentReserve(Settings(starvation_turns=3))
         assert eco.get_starvation_remaining() == 3
         eco.transition_to_stripped()
         assert eco.get_starvation_remaining() == 3
@@ -115,7 +115,7 @@ class TestEconomyStateMachine:
         assert eco.get_starvation_remaining() == 0
 
     def test_is_stripped_and_is_dead_helpers(self):
-        eco = CreditEconomy(Settings(starvation_turns=1))
+        eco = AgentReserve(Settings(starvation_turns=1))
         assert not eco.is_stripped()
         assert not eco.is_dead()
         eco.transition_to_stripped()

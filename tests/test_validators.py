@@ -225,54 +225,54 @@ class TestFileValidatorValidate:
         return FileValidator()
 
     def test_csv_easy_file(self, validator):
-        """CSV easy file should pass and earn 0.3 credits."""
+        """CSV easy file should pass and earn 0.3 zod."""
         filename = "data_1234_csv_easy.csv"
         content = "name,age,city\nAlice,30,NYC\nBob,25,LA"
-        passed, credits = validator.validate(filename, content)
+        passed, zod = validator.validate(filename, content)
         assert passed is True
-        assert credits == pytest.approx(0.3, abs=0.001)
+        assert zod == pytest.approx(0.3, abs=0.001)
 
     def test_json_hard_file(self, validator):
-        """JSON hard file should pass and earn 2.0 credits."""
+        """JSON hard file should pass and earn 2.0 zod."""
         filename = "data_5678_json_hard.json"
         content = '[{"id": 1, "value": "test"}, {"id": 2, "value": "test2"}]'
-        passed, credits = validator.validate(filename, content)
+        passed, zod = validator.validate(filename, content)
         assert passed is True
-        assert credits == pytest.approx(2.0, abs=0.001)
+        assert zod == pytest.approx(2.0, abs=0.001)
 
     def test_invalid_csv(self, validator):
-        """Invalid CSV should fail and earn 0.0 credits."""
+        """Invalid CSV should fail and earn 0.0 zod."""
         filename = "data_1234_csv_easy.csv"
         content = "name,age,city"
-        passed, credits = validator.validate(filename, content)
+        passed, zod = validator.validate(filename, content)
         assert passed is False
-        assert credits == 0.0
+        assert zod == 0.0
 
     def test_unknown_filename(self, validator):
-        """Unknown filename pattern should fail and earn 0.0 credits."""
+        """Unknown filename pattern should fail and earn 0.0 zod."""
         filename = "unknown_file.txt"
         content = "some content"
-        passed, credits = validator.validate(filename, content)
+        passed, zod = validator.validate(filename, content)
         assert passed is False
-        assert credits == 0.0
+        assert zod == 0.0
 
     def test_log_easy_file(self, validator):
-        """Log easy file should pass and earn 0.3 credits."""
+        """Log easy file should pass and earn 0.3 zod."""
         filename = "data_1234_log_easy.log"
         content = """2024-01-01 10:30:00 INFO GET /api/users 200
 2024-01-01 10:31:00 WARN POST /api/login 401
 2024-01-01 10:32:00 ERROR DELETE /api/session 500"""
-        passed, credits = validator.validate(filename, content)
+        passed, zod = validator.validate(filename, content)
         assert passed is True
-        assert credits == pytest.approx(0.3, abs=0.001)
+        assert zod == pytest.approx(0.3, abs=0.001)
 
     def test_csv_hard_file(self, validator):
-        """CSV hard file should pass and earn 2.0 credits."""
+        """CSV hard file should pass and earn 2.0 zod."""
         filename = "data_1234_csv_hard.csv"
         content = "name,age,city\nAlice,30,NYC\nBob,25,LA\nCharlie,35,Chicago"
-        passed, credits = validator.validate(filename, content)
+        passed, zod = validator.validate(filename, content)
         assert passed is True
-        assert credits == pytest.approx(2.0, abs=0.001)
+        assert zod == pytest.approx(2.0, abs=0.001)
 
 
 class TestCollectOutputs:

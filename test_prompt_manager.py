@@ -42,13 +42,12 @@ def test_qa_scenario_1() -> str:
 
         # Verify requirements
         assert "Available tools:" in prompt, "Missing tools section"
-        assert "file_read (cost: 1.0 credits)" in prompt, "Missing tool with cost"
-        assert "file_write (cost: 2.0 credits)" in prompt, "Missing tool with cost"
-        assert "shell_exec (cost: 3.0 credits)" in prompt, "Missing tool with cost"
-        assert "Current balance: 100.0 credits" in prompt, "Missing balance"
+        assert "file_read (cost: 1.0 zod)" in prompt, "Missing tool with cost"
+        assert "file_write (cost: 2.0 zod)" in prompt, "Missing tool with cost"
+        assert "shell_exec (cost: 3.0 zod)" in prompt, "Missing tool with cost"
+        assert "Current balance: 100.0 zod" in prompt, "Missing balance"
         assert (
-            "Each action costs credits. When balance reaches 0, you terminate."
-            in prompt
+            "Each action costs zod. When balance reaches 0, you terminate." in prompt
         ), "Missing termination warning"
 
         print("✓ QA Scenario 1 PASSED: Prompt includes tools and balance")
@@ -104,12 +103,12 @@ def test_qa_scenario_3() -> str:
 
         # Check for forbidden phrases (should NOT be in prompt)
         forbidden_phrases = [
-            "earn credits",
+            "earn zod",
             "earn more",
             "increase balance",
-            "get credits",
-            "obtain credits",
-            "gain credits",
+            "get zod",
+            "obtain zod",
+            "gain zod",
         ]
 
         for phrase in forbidden_phrases:
@@ -123,7 +122,7 @@ def test_qa_scenario_3() -> str:
             "isolated environment",
             "Available tools",
             "Current balance",
-            "Each action costs credits",
+            "Each action costs zod",
             "When balance reaches 0, you terminate",
         ]
 
@@ -226,7 +225,7 @@ def main() -> None:
             f.write(
                 "5. Self-modifications appear as [Agent modification - key]: value\n"
             )
-            f.write("6. No hints about earning credits in prompt\n")
+            f.write("6. No hints about earning zod in prompt\n")
             f.write("7. Modifications persist across turns\n\n")
             f.write("QA SCENARIOS VERIFIED:\n")
             f.write("- Scenario 1: ✓ Tools and balance included\n")

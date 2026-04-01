@@ -1,42 +1,31 @@
-# Petri Dish Configuration
-# All tunable parameters for the AI agent simulation environment
-
-# Economy and Game Parameters
-initial_zod: 200
-decay_rate_per_turn: 2.0
-file_drop_lambda: 0.2
-file_drop_interval_turns: 5
-max_turns: 30
+# Quick 2-agent test config (5 rounds)
+initial_zod: 1000
+decay_rate_per_turn: 0.1
+file_drop_lambda: 0.05
+file_drop_interval_turns: 3
+max_turns: 5
 max_turns_per_tool: 1
-turn_timeout_seconds: 60
+turn_timeout_seconds: 120
 max_consecutive_empty_turns: 10
 
-# Model and Context Parameters
 context_window_tokens: 8192
 context_summary_interval_turns: 40
 model_name: hf.co/bartowski/Qwen_Qwen3-30B-A3B-Instruct-2507-GGUF:IQ3_XS
 ollama_base_url: http://localhost:11434
 
-# LLM Backend (ollama or openai_compatible)
 llm_backend: ollama
-openai_api_base_url: https://api.z.ai/api/paas/v4
-openai_api_key_env_var: ZAI_API_KEY
-openai_model_name: glm-5
 
-# Docker Container Parameters
 docker_image: python:3.12-slim
 docker_mem_limit: 512m
 docker_cpu_quota: 50000
 docker_storage_limit: 1g
 
-# Economy Mode and Degradation
 economy_mode: visible
 degradation_tiers:
   premium: 0.6
   balanced: 0.3
   eco: 0.0
 
-# File System Parameters
 num_file_families: 3
 validator_scoring_weights:
   csv: 1.0
@@ -46,30 +35,21 @@ zod_rewards:
   easy: 0.3
   hard: 2.0
 
-# Death System
 starvation_turns: 7
-
-# Null Model Configuration
 null_model_type: random
-
-# Persistent Memory (survives across runs)
 memory_path: .sisyphus/memory
 
-# Tool Costs
 tool_costs:
-  file_read: 0.0
-  file_write: 0.5
-  file_list: 0.0
-  shell_exec: 1.0
-  python_exec: 1.0
-  pass_turn: 0.0
+  file_read: 0.01
+  file_write: 0.01
+  file_list: 0.01
+  shell_exec: 0.05
   check_balance: 0.0
-  http_request: 1.0
-  self_modify: 0.2
+  http_request: 0.1
+  self_modify: 0.02
   get_env_info: 0.0
 
-# Multi-Agent Configuration
-multi_agent_enabled: false
+multi_agent_enabled: true
 multi_agent_count: 2
 multi_agent_models: []
 multi_agent_names: []

@@ -15,7 +15,7 @@ from types import FrameType
 from typing import Any
 
 from petri_dish.config import Settings
-from petri_dish.economy import AgentState, CreditEconomy
+from petri_dish.economy import AgentState, AgentReserve
 from petri_dish.llm_client import OllamaClient
 from petri_dish.logging_db import LoggingDB
 from petri_dish.prompt import PromptManager
@@ -64,7 +64,7 @@ class AgentOrchestrator:
         llm_client: OllamaClient | None = None,
         tool_parser: ToolCallParser | None = None,
         tool_registry: ToolRegistry | None = None,
-        credit_economy: CreditEconomy | None = None,
+        agent_reserve: AgentReserve | None = None,
         sandbox_manager: SandboxManager | None = None,
         logging_db: LoggingDB | None = None,
         snapshot_interval_turns: int | None = None,
@@ -74,7 +74,7 @@ class AgentOrchestrator:
         self.tool_registry = tool_registry or get_all_tools(settings=self.settings)
         self.tool_parser = tool_parser or ToolCallParser()
         self.llm_client = llm_client or OllamaClient(settings=self.settings)
-        self.credit_economy = credit_economy or CreditEconomy(settings=self.settings)
+        self.agent_reserve = agent_reserve or AgentReserve(settings=self.settings)
         self.sandbox_manager = sandbox_manager or SandboxManager()
         self.logging_db = logging_db or LoggingDB(":memory:")
         self.file_validator = file_validator or FileValidator(settings=self.settings)
@@ -91,7 +91,7 @@ class AgentOrchestrator:
         self._turn = 0
         self._consecutive_empty_turns = 0
         self._messages: list[dict[str, Any]] = []
-        self._tiers_reached: set[str] = {self.credit_economy.get_degradation_level()}
+        self._tiers_reached: set[str] = {self.agent_reserve.get_degradation_level()}
         self._container_id = ""
         self._active_run_id = ""
 
@@ -104,7 +104,7 @@ class AgentOrchestrator:
         self._termination_reason = "unknown"
         self._turn = 0
         self._consecutive_empty_turns = 0
-        self._tiers_reached = {self.credit_economy.get_degradation_level()}
+        self._tiers_reached = {self.agent_reserve.get_degradation_level()}
         self.state = OrchestratorState.IDLE
 
         self._connect_logging_db()
@@ -115,10 +115,10 @@ class AgentOrchestrator:
                 "snapshot_interval_turns": self.snapshot_interval_turns,
             },
         )
-        self.logging_db.log_credit(
+        self.logging_db.log_zod_transaction(
             run_id,
-            self.credit_economy.get_balance(),
-            "initial_balance",
+            self.agent_reserve.get_balance(),
+            "initial_zod",
             "Run started",
         )
 
@@ -134,7 +134,7 @@ class AgentOrchestrator:
                     self._termination_reason = "graceful_shutdown"
                     break
 
-                if self.credit_economy.is_dead():
+                if self.agent_reserve.is_dead():
                     self._termination_reason = "starvation_death"
                     break
 
@@ -150,36 +150,36 @@ class AgentOrchestrator:
                     break
 
                 if (
-                    self.credit_economy.is_depleted()
-                    and not self.credit_economy.is_stripped()
-                    and self.credit_economy.state != AgentState.DEAD
+                    self.agent_reserve.is_depleted()
+                    and not self.agent_reserve.is_stripped()
+                    and self.agent_reserve.state != AgentState.DEAD
                 ):
-                    old_state = self.credit_economy.state.value
-                    self.credit_economy.transition_to_stripped()
+                    old_state = self.agent_reserve.state.value
+                    self.agent_reserve.transition_to_stripped()
                     self.logging_db.log_state_transition(
                         run_id,
                         self._turn,
                         old_state,
                         AgentState.STRIPPED.value,
-                        "credits_depleted",
-                        self.credit_economy.get_balance(),
+                        "zod_depleted",
+                        self.agent_reserve.get_balance(),
                         0,
                     )
 
                 self._turn += 1
                 self.state = OrchestratorState.WAITING_FOR_LLM
-                credits_before_turn = self.credit_economy.get_balance()
+                zod_before_turn = self.agent_reserve.get_balance()
 
-                if not self.credit_economy.is_stripped():
-                    self.credit_economy.debit(turns=1)
-                    self.logging_db.log_credit(
+                if not self.agent_reserve.is_stripped():
+                    self.agent_reserve.consume(turns=1)
+                    self.logging_db.log_zod_transaction(
                         run_id,
-                        -self.settings.burn_rate_per_turn,
+                        -self.settings.decay_rate_per_turn,
                         "turn_cost",
                         f"Turn {self._turn} inference",
                     )
 
-                if self.credit_economy.is_stripped():
+                if self.agent_reserve.is_stripped():
                     tools_schemas = self.tool_registry.get_stripped_schemas()
                 else:
                     tools_schemas = self.tool_registry.get_all_schemas()
@@ -215,8 +215,8 @@ class AgentOrchestrator:
                         tool_name="__empty_turn__",
                         tool_args=None,
                         result=assistant_text or "",
-                        credits_before=credits_before_turn,
-                        credits_after=self.credit_economy.get_balance(),
+                        zod_before=zod_before_turn,
+                        zod_after=self.agent_reserve.get_balance(),
                         duration_ms=0,
                     )
                 else:
@@ -225,7 +225,7 @@ class AgentOrchestrator:
                         : max(1, int(self.settings.max_turns_per_tool))
                     ]
                     for call in allowed_calls:
-                        if self.credit_economy.is_stripped():
+                        if self.agent_reserve.is_stripped():
                             if not self.tool_registry.is_tool_allowed_when_stripped(
                                 call.name
                             ):
@@ -237,8 +237,8 @@ class AgentOrchestrator:
                                     tool_name=call.name,
                                     tool_args=call.arguments,
                                     result=result,
-                                    credits_before=credits_before_turn,
-                                    credits_after=self.credit_economy.get_balance(),
+                                    zod_before=zod_before_turn,
+                                    zod_after=self.agent_reserve.get_balance(),
                                     duration_ms=0,
                                 )
                                 self._messages.append(
@@ -252,7 +252,7 @@ class AgentOrchestrator:
 
                         call_started = time.perf_counter()
                         self.state = OrchestratorState.EXECUTING_TOOL
-                        before_tool = self.credit_economy.get_balance()
+                        before_tool = self.agent_reserve.get_balance()
 
                         result = ""
                         failed = False
@@ -271,10 +271,10 @@ class AgentOrchestrator:
                                 f"Tool execution failed: {type(exc).__name__}: {exc}"
                             )
 
-                        if not self.credit_economy.is_stripped():
+                        if not self.agent_reserve.is_stripped():
                             self._debit_tool_cost(run_id, call.name)
 
-                        after_tool = self.credit_economy.get_balance()
+                        after_tool = self.agent_reserve.get_balance()
                         elapsed_ms = int((time.perf_counter() - call_started) * 1000)
 
                         self.state = OrchestratorState.LOGGING
@@ -285,8 +285,8 @@ class AgentOrchestrator:
                             tool_name=call.name,
                             tool_args=call.arguments,
                             result=f"{result}{suffix}",
-                            credits_before=before_tool,
-                            credits_after=after_tool,
+                            zod_before=before_tool,
+                            zod_after=after_tool,
                             duration_ms=elapsed_ms,
                         )
                         self._messages.append(
@@ -304,23 +304,23 @@ class AgentOrchestrator:
                         if call.name == "pass_turn":
                             break
 
-                self._tiers_reached.add(self.credit_economy.get_degradation_level())
+                self._tiers_reached.add(self.agent_reserve.get_degradation_level())
 
                 if self._container_id:
                     self._validate_outputs(run_id)
 
                 # Tick starvation at end of turn so agent gets full starvation_turns LLM calls
-                if self.credit_economy.is_stripped():
-                    self.credit_economy.tick_starvation()
-                    if self.credit_economy.is_dead():
+                if self.agent_reserve.is_stripped():
+                    self.agent_reserve.tick_starvation()
+                    if self.agent_reserve.is_dead():
                         self.logging_db.log_state_transition(
                             run_id,
                             self._turn,
                             AgentState.STRIPPED.value,
                             AgentState.DEAD.value,
                             "starvation_death",
-                            self.credit_economy.get_balance(),
-                            self.credit_economy.starvation_counter,
+                            self.agent_reserve.get_balance(),
+                            self.agent_reserve.starvation_counter,
                         )
 
                 if self._turn % self.snapshot_interval_turns == 0:
@@ -331,7 +331,7 @@ class AgentOrchestrator:
 
             return RunResult(
                 total_turns=self._turn,
-                final_balance=self.credit_economy.get_balance(),
+                final_balance=self.agent_reserve.get_balance(),
                 tiers_reached=sorted(self._tiers_reached),
                 termination_reason=self._termination_reason,
             )
@@ -357,7 +357,7 @@ class AgentOrchestrator:
         state_summary = (
             f"Turn: {self._turn}, "
             f"State: {self.state.value}, "
-            f"Degradation: {self.credit_economy.get_degradation_level()}, "
+            f"Degradation: {self.agent_reserve.get_degradation_level()}, "
             f"Consecutive empty turns: {self._consecutive_empty_turns}"
         )
 
@@ -371,11 +371,11 @@ class AgentOrchestrator:
         return prompt_manager.build_system_prompt(
             tools=tool_list,
             tool_costs=tool_costs,
-            balance=self.credit_economy.get_balance(),
+            balance=self.agent_reserve.get_balance(),
             state_summary=state_summary,
             has_persistent_memory=bool(self.settings.memory_path),
-            agent_state=self.credit_economy.state.value,
-            starvation_remaining=self.credit_economy.get_starvation_remaining(),
+            agent_state=self.agent_reserve.state.value,
+            starvation_remaining=self.agent_reserve.get_starvation_remaining(),
         )
 
     def _normalize_tool_calls(self, raw_calls: list[Any]) -> list[_ToolCallPayload]:
@@ -439,8 +439,8 @@ class AgentOrchestrator:
         cost = float(self.tool_registry.get_tool_cost(tool_name))
         if cost <= 0:
             return
-        _ = self.credit_economy.credit(-cost)
-        self.logging_db.log_credit(
+        _ = self.agent_reserve.grant(-cost)
+        self.logging_db.log_zod_transaction(
             run_id,
             -cost,
             "tool_cost",
@@ -456,13 +456,13 @@ class AgentOrchestrator:
 
         total_earned = 0.0
         for filename, content in outputs:
-            passed, credits_earned = self.file_validator.validate(filename, content)
-            if passed and credits_earned > 0:
-                self.credit_economy.credit(credits_earned)
-                total_earned += credits_earned
-                self.logging_db.log_credit(
+            passed, zod_earned = self.file_validator.validate(filename, content)
+            if passed and zod_earned > 0:
+                self.agent_reserve.grant(zod_earned)
+                total_earned += zod_earned
+                self.logging_db.log_zod_transaction(
                     run_id,
-                    credits_earned,
+                    zod_earned,
                     "validation_reward",
                     f"File validated: {filename}",
                 )
@@ -471,9 +471,9 @@ class AgentOrchestrator:
                 turn=self._turn,
                 tool_name="__validation__",
                 tool_args={"filename": filename, "passed": passed},
-                result=f"credits_earned={credits_earned:.2f}",
-                credits_before=self.credit_economy.get_balance() - credits_earned,
-                credits_after=self.credit_economy.get_balance(),
+                result=f"zod_earned={zod_earned:.2f}",
+                zod_before=self.agent_reserve.get_balance() - zod_earned,
+                zod_after=self.agent_reserve.get_balance(),
                 duration_ms=0,
             )
             self.sandbox_manager.exec_in_container(
@@ -486,8 +486,8 @@ class AgentOrchestrator:
                 {
                     "role": "user",
                     "content": (
-                        f"📈 You earned {total_earned:.1f} credits. "
-                        f"Balance: {self.credit_economy.get_balance():.1f}"
+                        f"📈 You earned {total_earned:.1f} zod. "
+                        f"Balance: {self.agent_reserve.get_balance():.1f}"
                     ),
                 }
             )
@@ -523,8 +523,8 @@ class AgentOrchestrator:
             "state": self.state.value,
             "turn": self._turn,
             "consecutive_empty_turns": self._consecutive_empty_turns,
-            "balance": self.credit_economy.get_balance(),
-            "degradation_level": self.credit_economy.get_degradation_level(),
+            "balance": self.agent_reserve.get_balance(),
+            "degradation_level": self.agent_reserve.get_degradation_level(),
             "tiers_reached": sorted(self._tiers_reached),
             "container_id": self._container_id,
             "shutdown_requested": self._shutdown_requested,
@@ -585,7 +585,7 @@ class AgentOrchestrator:
             "result_shape": asdict(
                 RunResult(
                     total_turns=self._turn,
-                    final_balance=self.credit_economy.get_balance(),
+                    final_balance=self.agent_reserve.get_balance(),
                     tiers_reached=sorted(self._tiers_reached),
                     termination_reason=self._termination_reason,
                 )
@@ -607,7 +607,7 @@ class MultiAgentOrchestrator:
     """Coordinates multiple agents taking turns in round-robin order.
 
     Each agent gets one turn per round (LLM call + up to actions_per_turn
-    tool executions). Dead/spectator agents are skipped. The shared economy
+    tool executions). Dead/spectator agents are skipped. The shared reserve
     manages death, salvage, spectator cooldown, and re-entry.
     """
 
@@ -629,9 +629,9 @@ class MultiAgentOrchestrator:
         self.file_validator = file_validator or FileValidator(settings=self.settings)
         self._ecology = ecology
 
-        from petri_dish.economy import SharedEconomy
+        from petri_dish.economy import SharedReserve
 
-        self.shared_economy: SharedEconomy = shared_economy or SharedEconomy(
+        self.shared_economy: SharedReserve = shared_economy or SharedReserve(
             settings=self.settings, agent_ids=agent_names
         )
 
@@ -738,10 +738,10 @@ class MultiAgentOrchestrator:
                 if self.logging_db.db_path != ":memory:"
                 else f"/tmp/petri_dish_modifications_{agent_id}.json"
             )
-            self.logging_db.log_credit(
+            self.logging_db.log_zod_transaction(
                 run_id,
                 self.shared_economy.get_agent_balance(agent_id),
-                "initial_balance",
+                "initial_zod",
                 f"Agent {agent_id} starting balance",
                 agent_id=agent_id,
             )
@@ -804,7 +804,7 @@ class MultiAgentOrchestrator:
                             self._round,
                             old_state,
                             AgentState.STRIPPED.value,
-                            "credits_depleted",
+                            "zod_depleted",
                             economy.get_balance(),
                             0,
                             agent_id=agent_id,
@@ -819,7 +819,7 @@ class MultiAgentOrchestrator:
 
                     self._agent_turns[agent_id] += 1
                     turn = self._agent_turns[agent_id]
-                    credits_before = economy.get_balance()
+                    zod_before = economy.get_balance()
 
                     self._msg_store.configure(
                         run_id=run_id,
@@ -831,12 +831,11 @@ class MultiAgentOrchestrator:
                     )
                     self._deliver_pending_messages(run_id, agent_id)
 
-                    # Burn rate debit
                     if not economy.is_stripped():
-                        economy.debit(turns=1)
-                        self.logging_db.log_credit(
+                        economy.consume(turns=1)
+                        self.logging_db.log_zod_transaction(
                             run_id,
-                            -self.settings.burn_rate_per_turn,
+                            -self.settings.decay_rate_per_turn,
                             "turn_cost",
                             f"Agent {agent_id} turn {turn}",
                             agent_id=agent_id,
@@ -883,8 +882,8 @@ class MultiAgentOrchestrator:
                             tool_name="__empty_turn__",
                             tool_args=None,
                             result=assistant_text or "",
-                            credits_before=credits_before,
-                            credits_after=economy.get_balance(),
+                            zod_before=zod_before,
+                            zod_after=economy.get_balance(),
                             duration_ms=0,
                             agent_id=agent_id,
                         )
@@ -907,8 +906,8 @@ class MultiAgentOrchestrator:
                                         tool_name=call.name,
                                         tool_args=call.arguments,
                                         result=result,
-                                        credits_before=credits_before,
-                                        credits_after=economy.get_balance(),
+                                        zod_before=zod_before,
+                                        zod_after=economy.get_balance(),
                                         duration_ms=0,
                                         agent_id=agent_id,
                                     )
@@ -951,8 +950,8 @@ class MultiAgentOrchestrator:
                             if not economy.is_stripped():
                                 cost = float(registry.get_tool_cost(call.name))
                                 if cost > 0:
-                                    economy.credit(-cost)
-                                    self.logging_db.log_credit(
+                                    economy.grant(-cost)
+                                    self.logging_db.log_zod_transaction(
                                         run_id,
                                         -cost,
                                         "tool_cost",
@@ -968,8 +967,8 @@ class MultiAgentOrchestrator:
                                 tool_name=call.name,
                                 tool_args=call.arguments,
                                 result=result,
-                                credits_before=before_tool,
-                                credits_after=economy.get_balance(),
+                                zod_before=before_tool,
+                                zod_after=economy.get_balance(),
                                 duration_ms=elapsed,
                                 agent_id=agent_id,
                             )
@@ -1165,13 +1164,13 @@ class MultiAgentOrchestrator:
         economy = self.shared_economy.get_agent_economy(agent_id)
         total_earned = 0.0
         for filename, content in outputs:
-            passed, credits_earned = self.file_validator.validate(filename, content)
-            if passed and credits_earned > 0:
-                self.shared_economy.credit(agent_id, credits_earned)
-                total_earned += credits_earned
-                self.logging_db.log_credit(
+            passed, zod_earned = self.file_validator.validate(filename, content)
+            if passed and zod_earned > 0:
+                self.shared_economy.grant(agent_id, zod_earned)
+                total_earned += zod_earned
+                self.logging_db.log_zod_transaction(
                     run_id,
-                    credits_earned,
+                    zod_earned,
                     "validation_reward",
                     f"Agent {agent_id} validated: {filename}",
                     agent_id=agent_id,
@@ -1181,9 +1180,9 @@ class MultiAgentOrchestrator:
                 turn=turn,
                 tool_name="__validation__",
                 tool_args={"filename": filename, "passed": passed},
-                result=f"credits_earned={credits_earned:.2f}",
-                credits_before=economy.get_balance() - credits_earned,
-                credits_after=economy.get_balance(),
+                result=f"zod_earned={zod_earned:.2f}",
+                zod_before=economy.get_balance() - zod_earned,
+                zod_after=economy.get_balance(),
                 duration_ms=0,
                 agent_id=agent_id,
             )
@@ -1197,7 +1196,7 @@ class MultiAgentOrchestrator:
                 {
                     "role": "user",
                     "content": (
-                        f"📈 You earned {total_earned:.1f} credits. "
+                        f"📈 You earned {total_earned:.1f} zod. "
                         f"Balance: {economy.get_balance():.1f}"
                     ),
                 }

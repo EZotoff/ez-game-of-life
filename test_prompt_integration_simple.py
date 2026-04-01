@@ -34,10 +34,10 @@ def test_prompt_manager_direct():
 
     # Verify basic requirements
     assert "test_tool" in prompt, "Prompt should contain tool names"
-    assert "1.0 credits" in prompt, "Prompt should contain tool costs"
-    assert "50.0 credits" in prompt, "Prompt should contain balance"
+    assert "1.0 zod" in prompt, "Prompt should contain tool costs"
+    assert "50.0 zod" in prompt, "Prompt should contain balance"
     assert "another_tool" in prompt, "Prompt should contain all tools"
-    assert "2.0 credits" in prompt, "Prompt should contain all tool costs"
+    assert "2.0 zod" in prompt, "Prompt should contain all tool costs"
 
     # Verify no earning hints
     assert "earn" not in prompt.lower(), "Prompt should not contain earning hints"

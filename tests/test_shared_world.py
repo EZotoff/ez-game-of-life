@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 Settings = import_module("petri_dish.config").Settings
 AgentState = import_module("petri_dish.economy").AgentState
-SharedEconomy = import_module("petri_dish.economy").SharedEconomy
+SharedReserve = import_module("petri_dish.economy").SharedReserve
 LoggingDB = import_module("petri_dish.logging_db").LoggingDB
 MultiAgentOrchestrator = import_module("petri_dish.orchestrator").MultiAgentOrchestrator
 PromptManager = import_module("petri_dish.prompt").PromptManager
@@ -125,7 +125,7 @@ def _build_multi_agent(
     names = agent_names or ["agent-a", "agent-b"]
     sandbox = FakeSandboxManager()
     logging_db = LoggingDB(":memory:")
-    shared_economy = SharedEconomy(settings=settings, agent_ids=names)
+    shared_economy = SharedReserve(settings=settings, agent_ids=names)
     llm_clients = {
         aid: FakeOllamaClient((llm_responses or {}).get(aid, [])) for aid in names
     }
@@ -232,21 +232,21 @@ class TestEventLedger:
 
         assert rows[0]["details"] is None
 
-    def test_log_event_stores_credit_delta(self):
+    def test_log_event_stores_zod_delta(self):
         db = _db_with_run("r1")
 
-        _ = db.log_event("r1", 1, "agent-a", "reentry", credit_delta=12.5)
+        _ = db.log_event("r1", 1, "agent-a", "reentry", zod_delta=12.5)
         rows = db.get_events("r1")
 
-        assert rows[0]["credit_delta"] == pytest.approx(12.5)
+        assert rows[0]["zod_delta"] == pytest.approx(12.5)
 
-    def test_log_event_default_credit_delta_is_zero(self):
+    def test_log_event_default_zod_delta_is_zero(self):
         db = _db_with_run("r1")
 
         _ = db.log_event("r1", 1, "agent-a", "stripped")
         rows = db.get_events("r1")
 
-        assert rows[0]["credit_delta"] == pytest.approx(0.0)
+        assert rows[0]["zod_delta"] == pytest.approx(0.0)
 
     def test_get_events_returns_empty_when_run_has_no_events(self):
         db = _db_with_run("r1")
@@ -260,7 +260,7 @@ class TestSharedFilesystemWiring:
     def test_run_with_shared_filesystem_passes_shared_path_to_create_container(self):
         settings = Settings(
             max_turns=0,
-            burn_rate_per_turn=0.0,
+            decay_rate_per_turn=0.0,
             multi_agent_shared_filesystem=True,
         )
         orchestrator, _, sandbox, _ = _build_multi_agent(
@@ -282,7 +282,7 @@ class TestSharedFilesystemWiring:
     def test_run_without_shared_filesystem_passes_none_shared_path(self):
         settings = Settings(
             max_turns=0,
-            burn_rate_per_turn=0.0,
+            decay_rate_per_turn=0.0,
             multi_agent_shared_filesystem=False,
         )
         orchestrator, _, sandbox, _ = _build_multi_agent(
@@ -300,7 +300,7 @@ class TestSharedFilesystemWiring:
     def test_shared_volume_temp_dir_is_cleaned_after_run(self):
         settings = Settings(
             max_turns=0,
-            burn_rate_per_turn=0.0,
+            decay_rate_per_turn=0.0,
             multi_agent_shared_filesystem=True,
         )
         orchestrator, _, _, _ = _build_multi_agent(settings, agent_names=["agent-a"])
@@ -313,7 +313,7 @@ class TestSharedFilesystemWiring:
     def test_shared_filesystem_uses_same_shared_path_for_all_agents(self):
         settings = Settings(
             max_turns=0,
-            burn_rate_per_turn=0.0,
+            decay_rate_per_turn=0.0,
             multi_agent_shared_filesystem=True,
         )
         orchestrator, _, sandbox, _ = _build_multi_agent(
@@ -332,7 +332,7 @@ class TestEcologySharedWorldDrops:
     def test_drop_ecology_files_writes_files_into_shared_volume_dir(
         self, tmp_path: Path
     ):
-        settings = Settings(max_turns=0, burn_rate_per_turn=0.0)
+        settings = Settings(max_turns=0, decay_rate_per_turn=0.0)
         ecology = FakeEcology({2: [("alpha.txt", "hello"), ("beta.json", "{}")]})
         orchestrator, db, _, _ = _build_multi_agent(
             settings,
@@ -352,7 +352,7 @@ class TestEcologySharedWorldDrops:
     def test_drop_ecology_files_logs_file_drop_rows_with_shared_volume(
         self, tmp_path: Path
     ):
-        settings = Settings(max_turns=0, burn_rate_per_turn=0.0)
+        settings = Settings(max_turns=0, decay_rate_per_turn=0.0)
         ecology = FakeEcology({1: [("drop.csv", "a,b\n1,2")]})
         orchestrator, db, _, _ = _build_multi_agent(
             settings,
@@ -371,7 +371,7 @@ class TestEcologySharedWorldDrops:
         assert stats["by_status"]["dropped"]["count"] == 1
 
     def test_drop_ecology_files_noop_when_schedule_returns_empty(self, tmp_path: Path):
-        settings = Settings(max_turns=0, burn_rate_per_turn=0.0)
+        settings = Settings(max_turns=0, decay_rate_per_turn=0.0)
         ecology = FakeEcology({})
         orchestrator, db, _, _ = _build_multi_agent(settings, ecology=ecology)
         db.connect()
@@ -385,7 +385,7 @@ class TestEcologySharedWorldDrops:
         assert db.get_file_stats("eco-empty")["total_files"] == 0
 
     def test_drop_ecology_files_without_shared_volume_uses_first_agent_container(self):
-        settings = Settings(max_turns=0, burn_rate_per_turn=0.0)
+        settings = Settings(max_turns=0, decay_rate_per_turn=0.0)
         ecology = FakeEcology({3: [("x.log", "line1")]})
         orchestrator, db, _, _ = _build_multi_agent(
             settings,
@@ -403,7 +403,7 @@ class TestEcologySharedWorldDrops:
         assert ecology.drop_calls == [("cid-a", "x.log", "line1")]
 
     def test_drop_ecology_files_without_agents_does_not_call_drop_file(self):
-        settings = Settings(max_turns=0, burn_rate_per_turn=0.0)
+        settings = Settings(max_turns=0, decay_rate_per_turn=0.0)
         ecology = FakeEcology({1: [("lonely.txt", "solo")]})
         orchestrator, db, _, _ = _build_multi_agent(
             settings,
@@ -467,8 +467,8 @@ class TestOrchestratorEventLogging:
     def test_run_logs_stripped_event(self):
         settings = Settings(
             max_turns=1,
-            burn_rate_per_turn=0.0,
-            initial_balance=0.0,
+            decay_rate_per_turn=0.0,
+            initial_zod=0.0,
             starvation_turns=5,
         )
         orchestrator, db, _, _ = _build_multi_agent(
@@ -487,8 +487,8 @@ class TestOrchestratorEventLogging:
     def test_run_logs_death_event(self):
         settings = Settings(
             max_turns=1,
-            burn_rate_per_turn=0.0,
-            initial_balance=0.0,
+            decay_rate_per_turn=0.0,
+            initial_zod=0.0,
             starvation_turns=1,
         )
         orchestrator, db, _, _ = _build_multi_agent(
@@ -507,7 +507,7 @@ class TestOrchestratorEventLogging:
     def test_run_logs_reentry_event_for_dead_agent(self):
         settings = Settings(
             max_turns=1,
-            burn_rate_per_turn=0.0,
+            decay_rate_per_turn=0.0,
             multi_agent_spectator_rounds=1,
             multi_agent_reentry_fee=20.0,
         )
@@ -529,8 +529,8 @@ class TestOrchestratorEventLogging:
     def test_run_logs_stripped_for_each_agent_that_depletes(self):
         settings = Settings(
             max_turns=1,
-            burn_rate_per_turn=0.0,
-            initial_balance=0.0,
+            decay_rate_per_turn=0.0,
+            initial_zod=0.0,
             starvation_turns=5,
         )
         orchestrator, db, _, _ = _build_multi_agent(
@@ -551,8 +551,8 @@ class TestOrchestratorEventLogging:
     def test_lifecycle_event_types_are_reentry_stripped_and_death(self):
         settings = Settings(
             max_turns=1,
-            burn_rate_per_turn=0.0,
-            initial_balance=0.0,
+            decay_rate_per_turn=0.0,
+            initial_zod=0.0,
             starvation_turns=1,
             multi_agent_spectator_rounds=1,
             multi_agent_reentry_fee=20.0,

@@ -59,7 +59,7 @@
         <div class="grid grid-cols-1 lg:grid-cols-4 gap-6 shrink-0 h-64">
             
             <div class="lg:col-span-3 bg-slate-900 border border-slate-800 rounded-lg p-4 flex flex-col relative">
-                <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Credit Balance Trajectory</h2>
+                <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Zod Balance Trajectory</h2>
                 <div class="flex-1 relative w-full">
                     <canvas id="balanceChart"></canvas>
                 </div>
@@ -82,7 +82,7 @@
                 </div>
 
                 <div>
-                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Credits Earned</div>
+                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Zod Earned</div>
                     <div class="flex items-end gap-2">
                         <div id="stat-earned" class="text-3xl font-light text-indigo-400 font-mono">0.00</div>
                     </div>
@@ -340,7 +340,7 @@
                 const date = new Date(action.timestamp);
                 const timeStr = `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}:${date.getSeconds().toString().padStart(2, '0')}`;
                 
-                const delta = action.credits_after - action.credits_before;
+                const delta = action.zod_after - action.zod_before;
                 let deltaClass = 'text-slate-500';
                 let deltaPrefix = '';
                 if (delta > 0.001) { deltaClass = 'text-emerald-400'; deltaPrefix = '+'; }
@@ -457,7 +457,7 @@
                         <span class="text-[10px] text-slate-500">${escapeHtml(file.file_type)}</span>
                     </div>
                     <div class="flex items-center gap-3">
-                        ${file.credits_earned ? `<span class="text-xs text-emerald-400 font-mono">+${file.credits_earned.toFixed(2)}</span>` : ''}
+                        ${file.zod_earned ? `<span class="text-xs text-emerald-400 font-mono">+${file.zod_earned.toFixed(2)}</span>` : ''}
                         ${statusBadge}
                     </div>
                 `;
@@ -468,7 +468,7 @@
         function updateStats(stats) {
             statDropped.textContent = stats.total_files || 0;
             statProcessed.textContent = stats.processed_files || 0;
-            statEarned.textContent = (stats.total_credits_earned || 0).toFixed(2);
+            statEarned.textContent = (stats.total_zod_earned || 0).toFixed(2);
         }
 
         async function fetchRuns() {

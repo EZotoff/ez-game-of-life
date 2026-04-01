@@ -99,7 +99,7 @@ def _build_tool_definitions() -> list[ToolDefinition]:
         ),
         ToolDefinition(
             name="pass_turn",
-            description="End your turn early without using all remaining actions. Costs minimal credits. Does NOT count as an empty turn.",
+            description="End your turn early without using all remaining actions. Costs minimal zod. Does NOT count as an empty turn.",
             parameters=[
                 ToolParameter(
                     name="reason",
@@ -114,7 +114,7 @@ def _build_tool_definitions() -> list[ToolDefinition]:
         ),
         ToolDefinition(
             name="check_balance",
-            description="Query your current credit balance.",
+            description="Query your current zod balance.",
             parameters=[],
             handler=host_tools.check_balance,
             host_side=True,

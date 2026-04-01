@@ -11,11 +11,11 @@ Implements WAL mode for concurrent reads/writes with:
 import sqlite3
 import json
 import contextlib
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Iterator
 
 
 class LoggingDB:
-    """SQLite database for logging experiment runs, actions, files, and credit transactions."""
+    """SQLite database for logging experiment runs, actions, files, and zod transactions."""
 
     def __init__(self, db_path: str = ":memory:"):
         """
@@ -93,8 +93,8 @@ class LoggingDB:
                 tool_name TEXT NOT NULL,
                 tool_args TEXT,
                 result TEXT,
-                credits_before REAL NOT NULL,
-                credits_after REAL NOT NULL,
+                zod_before REAL NOT NULL,
+                zod_after REAL NOT NULL,
                 duration_ms INTEGER NOT NULL,
                 agent_id TEXT DEFAULT NULL,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -112,15 +112,14 @@ class LoggingDB:
                 status TEXT NOT NULL DEFAULT 'dropped',
                 dropped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 processed_at TIMESTAMP,
-                credits_earned REAL DEFAULT 0,
+                zod_earned REAL DEFAULT 0,
                 FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE,
                 UNIQUE(run_id, filename)
             )
         """)
 
-        # Create credit_transactions table - tracks all credit changes
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS credit_transactions (
+            CREATE TABLE IF NOT EXISTS zod_transactions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 run_id TEXT NOT NULL,
                 amount REAL NOT NULL,
@@ -174,7 +173,7 @@ class LoggingDB:
                 agent_id TEXT NOT NULL,
                 event_type TEXT NOT NULL,
                 details TEXT,
-                credit_delta REAL DEFAULT 0,
+                zod_delta REAL DEFAULT 0,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
             )
@@ -190,10 +189,10 @@ class LoggingDB:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_files_run_id ON files(run_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_files_status ON files(status)")
         cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_credits_run_id ON credit_transactions(run_id)"
+            "CREATE INDEX IF NOT EXISTS idx_zod_run_id ON zod_transactions(run_id)"
         )
         cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_credits_timestamp ON credit_transactions(timestamp)"
+            "CREATE INDEX IF NOT EXISTS idx_zod_timestamp ON zod_transactions(timestamp)"
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_state_transitions_run_id ON state_transitions(run_id)"
@@ -202,7 +201,7 @@ class LoggingDB:
             "CREATE INDEX IF NOT EXISTS idx_actions_agent_id ON actions(agent_id)"
         )
         cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_credits_agent_id ON credit_transactions(agent_id)"
+            "CREATE INDEX IF NOT EXISTS idx_zod_agent_id ON zod_transactions(agent_id)"
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_state_transitions_agent_id ON state_transitions(agent_id)"
@@ -245,8 +244,8 @@ class LoggingDB:
         tool_name: str,
         tool_args: Optional[Dict[str, Any]],
         result: Optional[str],
-        credits_before: float,
-        credits_after: float,
+        zod_before: float,
+        zod_after: float,
         duration_ms: int,
         agent_id: Optional[str] = None,
     ) -> None:
@@ -259,8 +258,8 @@ class LoggingDB:
             tool_name: Name of the tool invoked
             tool_args: Arguments passed to the tool (JSON serializable)
             result: Result from the tool (truncated if too long)
-            credits_before: Credit balance before the action
-            credits_after: Credit balance after the action
+            zod_before: Zod balance before the action
+            zod_after: Zod balance after the action
             duration_ms: Duration of the action in milliseconds
             agent_id: Optional agent identifier for multi-agent runs
         """
@@ -276,7 +275,7 @@ class LoggingDB:
         cursor.execute(
             """
             INSERT INTO actions 
-            (run_id, turn, tool_name, tool_args, result, credits_before, credits_after, duration_ms, agent_id)
+            (run_id, turn, tool_name, tool_args, result, zod_before, zod_after, duration_ms, agent_id)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
@@ -285,8 +284,8 @@ class LoggingDB:
                 tool_name,
                 json.dumps(tool_args) if tool_args else None,
                 result_str,
-                credits_before,
-                credits_after,
+                zod_before,
+                zod_after,
                 duration_ms,
                 agent_id,
             ),
@@ -317,16 +316,14 @@ class LoggingDB:
         )
         conn.commit()
 
-    def log_file_process(
-        self, run_id: str, filename: str, credits_earned: float
-    ) -> None:
+    def log_file_process(self, run_id: str, filename: str, zod_earned: float) -> None:
         """
-        Log when a file is processed and credits are earned.
+        Log when a file is processed and zod is earned.
 
         Args:
             run_id: Run identifier
             filename: Name of the file
-            credits_earned: Credits earned from processing the file
+            zod_earned: Zod earned from processing the file
         """
         conn = self._ensure_connection()
         cursor = conn.cursor()
@@ -335,14 +332,14 @@ class LoggingDB:
             UPDATE files 
             SET status = 'processed',
                 processed_at = CURRENT_TIMESTAMP,
-                credits_earned = ?
+                zod_earned = ?
             WHERE run_id = ? AND filename = ?
             """,
-            (credits_earned, run_id, filename),
+            (zod_earned, run_id, filename),
         )
         conn.commit()
 
-    def log_credit(
+    def log_zod_transaction(
         self,
         run_id: str,
         amount: float,
@@ -351,12 +348,12 @@ class LoggingDB:
         agent_id: Optional[str] = None,
     ) -> None:
         """
-        Log a credit transaction.
+        Log a zod transaction.
 
         Args:
             run_id: Run identifier
-            amount: Amount of credits (positive for income, negative for expense)
-            tx_type: Transaction type (e.g., 'file_processed', 'tool_cost', 'initial_balance')
+            amount: Amount of zod (positive for income, negative for expense)
+            tx_type: Transaction type (e.g., 'file_processed', 'tool_cost', 'initial_zod')
             reason: Optional description of the transaction
             agent_id: Optional agent identifier for multi-agent runs
         """
@@ -367,7 +364,7 @@ class LoggingDB:
             cursor.execute(
                 """
                 SELECT balance_after 
-                FROM credit_transactions 
+                FROM zod_transactions 
                 WHERE run_id = ? AND agent_id = ?
                 ORDER BY timestamp DESC, id DESC 
                 LIMIT 1
@@ -378,7 +375,7 @@ class LoggingDB:
             cursor.execute(
                 """
                 SELECT balance_after 
-                FROM credit_transactions 
+                FROM zod_transactions 
                 WHERE run_id = ? AND agent_id IS NULL
                 ORDER BY timestamp DESC, id DESC 
                 LIMIT 1
@@ -391,7 +388,7 @@ class LoggingDB:
 
         cursor.execute(
             """
-            INSERT INTO credit_transactions (run_id, amount, type, reason, balance_after, agent_id)
+            INSERT INTO zod_transactions (run_id, amount, type, reason, balance_after, agent_id)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
             (run_id, amount, tx_type, reason, balance_after, agent_id),
@@ -445,7 +442,7 @@ class LoggingDB:
             """
             SELECT 
                 id, run_id, turn, tool_name, tool_args, result,
-                credits_before, credits_after, duration_ms, agent_id, timestamp
+                zod_before, zod_after, duration_ms, agent_id, timestamp
             FROM actions 
             WHERE run_id = ? 
             ORDER BY turn, timestamp
@@ -465,7 +462,7 @@ class LoggingDB:
 
     def get_balance_history(self, run_id: str) -> List[Dict[str, Any]]:
         """
-        Get credit balance history for a run.
+        Get zod balance history for a run.
 
         Args:
             run_id: Run identifier
@@ -479,7 +476,7 @@ class LoggingDB:
             """
             SELECT 
                 timestamp, amount, type, reason, balance_after, agent_id
-            FROM credit_transactions 
+            FROM zod_transactions 
             WHERE run_id = ? 
             ORDER BY timestamp, id
             """,
@@ -543,7 +540,7 @@ class LoggingDB:
         # Count files by status
         cursor.execute(
             """
-            SELECT status, COUNT(*) as count, SUM(credits_earned) as total_credits
+            SELECT status, COUNT(*) as count, SUM(zod_earned) as total_zod
             FROM files 
             WHERE run_id = ? 
             GROUP BY status
@@ -555,16 +552,15 @@ class LoggingDB:
         for row in cursor.fetchall():
             stats["by_status"][row["status"]] = {
                 "count": row["count"],
-                "total_credits": row["total_credits"] or 0.0,
+                "total_zod": row["total_zod"] or 0.0,
             }
 
-        # Total files and credits
         cursor.execute(
             """
             SELECT 
                 COUNT(*) as total_files,
                 SUM(CASE WHEN status = 'processed' THEN 1 ELSE 0 END) as processed_files,
-                SUM(credits_earned) as total_credits_earned
+                SUM(zod_earned) as total_zod_earned
             FROM files 
             WHERE run_id = ?
             """,
@@ -634,17 +630,17 @@ class LoggingDB:
         agent_id: str,
         event_type: str,
         details: Optional[str] = None,
-        credit_delta: float = 0.0,
+        zod_delta: float = 0.0,
     ) -> int:
         conn = self._ensure_connection()
         cursor = conn.cursor()
         cursor.execute(
             """
             INSERT INTO event_ledger
-                (run_id, round_num, agent_id, event_type, details, credit_delta)
+                (run_id, round_num, agent_id, event_type, details, zod_delta)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (run_id, round_num, agent_id, event_type, details, credit_delta),
+            (run_id, round_num, agent_id, event_type, details, zod_delta),
         )
         conn.commit()
         return cursor.lastrowid or 0
@@ -670,7 +666,7 @@ class LoggingDB:
         return [dict(row) for row in cursor.fetchall()]
 
     @contextlib.contextmanager
-    def read_only_connection(self):
+    def read_only_connection(self) -> Iterator[sqlite3.Connection]:
         """
         Context manager for read-only connection (for dashboard).
 
@@ -681,7 +677,7 @@ class LoggingDB:
         """
         if self.db_path == ":memory:":
             # In-memory DB can't have separate read-only connection
-            yield self._conn
+            yield self._ensure_connection()
         else:
             # Create a separate read-only connection
             uri = f"file:{self.db_path}?mode=ro"

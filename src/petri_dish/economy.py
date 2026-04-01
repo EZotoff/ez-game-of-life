@@ -1,7 +1,7 @@
-"""Credit economy system for Petri Dish agent simulation.
+"""Agent reserve system for Petri Dish agent simulation.
 
-Manages credit balance with earn/burn mechanics and degradation levels.
-Every credit transaction is logged. Failed tool calls still cost credits.
+Manages zod balance with grant/decay mechanics and degradation levels.
+Every zod transaction is logged. Failed tool calls still consume zod.
 """
 
 from __future__ import annotations
@@ -20,10 +20,10 @@ class AgentState(str, Enum):
     DEAD = "dead"
 
 
-class CreditEconomy:
-    """Manages agent credit balance with earn/burn mechanics and degradation tiers.
+class AgentReserve:
+    """Manages agent zod balance with grant/decay mechanics and degradation tiers.
 
-    Parameters are loaded from Settings (config.yaml). Credits are stored as float
+    Parameters are loaded from Settings (config.yaml). Zod is stored as float
     for precision. Every transaction is logged.
 
     Degradation tiers:
@@ -33,7 +33,7 @@ class CreditEconomy:
     """
 
     def __init__(self, settings: Settings | None = None) -> None:
-        """Initialize economy from config settings.
+        """Initialize reserve from config settings.
 
         Args:
             settings: Settings instance. If None, loads from config.yaml.
@@ -41,11 +41,11 @@ class CreditEconomy:
         if settings is None:
             settings = Settings.from_yaml()
 
-        self.initial_balance: float = float(settings.initial_balance)
-        self.balance: float = self.initial_balance
-        self.burn_rate_per_turn: float = float(settings.burn_rate_per_turn)
+        self.initial_zod: float = float(settings.initial_zod)
+        self.balance: float = self.initial_zod
+        self.decay_rate_per_turn: float = float(settings.decay_rate_per_turn)
         self.starvation_turns: int = int(settings.starvation_turns)
-        self.lifetime_credits_earned: float = self.initial_balance
+        self.lifetime_zod_earned: float = self.initial_zod
 
         self._degradation_tiers: dict[str, float] = settings.degradation_tiers
         self._premium_threshold: float = float(
@@ -59,51 +59,51 @@ class CreditEconomy:
         self.starvation_counter: int = 0
 
         logger.info(
-            "CreditEconomy initialized: balance=%.2f, burn_rate=%.4f, thresholds(premium=%.0f%%, balanced=%.0f%%, eco=<%.0f%%), starvation_turns=%d",
+            "AgentReserve initialized: balance=%.2f, decay_rate=%.4f, thresholds(premium=%.0f%%, balanced=%.0f%%, eco=<%.0f%%), starvation_turns=%d",
             self.balance,
-            self.burn_rate_per_turn,
+            self.decay_rate_per_turn,
             self._premium_threshold * 100,
             self._balanced_threshold * 100,
             self._balanced_threshold * 100,
             self.starvation_turns,
         )
 
-    def debit(self, turns: int = 1) -> float:
-        """Deduct credits for inference turns.
+    def consume(self, turns: int = 1) -> float:
+        """Consume zod for inference turns.
 
-        No-op when agent is STRIPPED — no burn rate charged in stripped state.
+        No-op when agent is STRIPPED — no decay rate charged in stripped state.
         """
         if self.state == AgentState.STRIPPED:
             return self.balance
 
-        cost = self.burn_rate_per_turn * turns
+        cost = self.decay_rate_per_turn * turns
         old_balance = self.balance
         self.balance -= cost
         logger.info(
-            "DEBIT: %.4f credits (turns=%d, rate=%.4f) | %.2f -> %.2f",
+            "CONSUME: %.4f zod (turns=%d, rate=%.4f) | %.2f -> %.2f",
             cost,
             turns,
-            self.burn_rate_per_turn,
+            self.decay_rate_per_turn,
             old_balance,
             self.balance,
         )
         return self.balance
 
-    def credit(self, amount: float) -> float:
-        """Add earned credits to balance.
+    def grant(self, amount: float) -> float:
+        """Grant earned zod to balance.
 
         Args:
-            amount: Credits to add.
+            amount: Zod to add.
 
         Returns:
-            New balance after credit.
+            New balance after grant.
         """
         old_balance = self.balance
         self.balance += amount
         if amount > 0:
-            self.lifetime_credits_earned += amount
+            self.lifetime_zod_earned += amount
         logger.info(
-            "CREDIT: +%.4f credits | %.2f -> %.2f",
+            "GRANT: +%.4f zod | %.2f -> %.2f",
             amount,
             old_balance,
             self.balance,
@@ -111,19 +111,19 @@ class CreditEconomy:
         return self.balance
 
     def get_balance(self) -> float:
-        """Return current credit balance."""
+        """Return current zod balance."""
         return self.balance
 
     def is_depleted(self) -> bool:
-        """Check if credits are depleted (balance <= 0)."""
+        """Check if zod is depleted (balance <= 0)."""
         return self.balance <= 0
 
     def get_degradation_level(self) -> str:
         """Return current degradation tier based on balance ratio."""
-        if self.initial_balance <= 0:
+        if self.initial_zod <= 0:
             return "eco"
 
-        ratio = self.balance / self.initial_balance
+        ratio = self.balance / self.initial_zod
 
         if ratio > self._premium_threshold:
             return "premium"
@@ -162,7 +162,7 @@ class CreditEconomy:
             return False
         if amount <= 0:
             return False
-        self.credit(amount)
+        self.grant(amount)
         self.state = AgentState.ACTIVE
         self.starvation_counter = 0
         logger.info(
@@ -182,10 +182,10 @@ class CreditEconomy:
         return max(0, self.starvation_turns - self.starvation_counter)
 
 
-class SharedEconomy:
-    """Multi-agent economy with common pool and per-agent wallets.
+class SharedReserve:
+    """Multi-agent reserve with common pool and per-agent reserves.
 
-    Manages N CreditEconomy instances, a shared common pool for
+    Manages N AgentReserve instances, a shared common pool for
     salvage/re-entry, debt garnishing on earnings, and spectator
     cooldown after death.
     """
@@ -200,21 +200,21 @@ class SharedEconomy:
 
         self.settings = settings
         self.common_pool: float = 0.0
-        self.agent_economies: dict[str, CreditEconomy] = {}
+        self.agent_reserves: dict[str, AgentReserve] = {}
         self.agent_debt: dict[str, float] = {}
         self.spectator_counters: dict[str, int] = {}
 
         ids = agent_ids or [f"agent-{i}" for i in range(settings.multi_agent_count)]
         for agent_id in ids:
-            self.agent_economies[agent_id] = CreditEconomy(settings)
+            self.agent_reserves[agent_id] = AgentReserve(settings)
             self.agent_debt[agent_id] = 0.0
             self.spectator_counters[agent_id] = 0
 
-    def debit(self, agent_id: str, turns: int = 1) -> float:
-        return self.agent_economies[agent_id].debit(turns)
+    def consume(self, agent_id: str, turns: int = 1) -> float:
+        return self.agent_reserves[agent_id].consume(turns)
 
-    def credit(self, agent_id: str, amount: float) -> float:
-        economy = self.agent_economies[agent_id]
+    def grant(self, agent_id: str, amount: float) -> float:
+        economy = self.agent_reserves[agent_id]
         if amount > 0 and self.agent_debt.get(agent_id, 0) > 0:
             garnish = min(
                 self.agent_debt[agent_id],
@@ -223,27 +223,27 @@ class SharedEconomy:
             self.agent_debt[agent_id] -= garnish
             self.common_pool += garnish
             amount -= garnish
-        return economy.credit(amount)
+        return economy.grant(amount)
 
     def handle_death(self, agent_id: str) -> float:
-        economy = self.agent_economies[agent_id]
+        economy = self.agent_reserves[agent_id]
         balance = economy.get_balance()
 
         # Penalty base uses lifetime earnings (not just current balance) so death
         # is costly even when the agent has spent down to 0 before dying.
         penalty_base = max(
             balance,
-            economy.lifetime_credits_earned,
-            self.settings.initial_balance,
+            economy.lifetime_zod_earned,
+            self.settings.initial_zod,
         )
-        burn = penalty_base * self.settings.multi_agent_burn_pct
+        decay = penalty_base * self.settings.multi_agent_decay_pct
         salvage = penalty_base * self.settings.multi_agent_salvage_pct
 
-        total_penalty = burn + salvage
+        total_penalty = decay + salvage
         if balance >= total_penalty:
-            economy.credit(-total_penalty)
+            economy.grant(-total_penalty)
         else:
-            economy.credit(-balance)
+            economy.grant(-balance)
             self.agent_debt[agent_id] += total_penalty - balance
 
         self.common_pool += salvage
@@ -252,18 +252,18 @@ class SharedEconomy:
         economy.starvation_counter = 0
         self.spectator_counters[agent_id] = 0
         logger.info(
-            "DEATH: %s forfeited %.2f of %.2f lifetime (burned=%.2f, salvage=%.2f, debt=%.2f)",
+            "DEATH: %s forfeited %.2f of %.2f lifetime (decayed=%.2f, salvage=%.2f, debt=%.2f)",
             agent_id,
             total_penalty,
             penalty_base,
-            burn,
+            decay,
             salvage,
             self.agent_debt[agent_id],
         )
         return salvage
 
     def tick_spectator(self, agent_id: str) -> bool:
-        if not self.agent_economies[agent_id].is_dead():
+        if not self.agent_reserves[agent_id].is_dead():
             return False
         self.spectator_counters[agent_id] += 1
         cooldown = self.settings.multi_agent_spectator_rounds
@@ -276,7 +276,7 @@ class SharedEconomy:
         return self.spectator_counters[agent_id] >= cooldown
 
     def reentry(self, agent_id: str) -> bool:
-        economy = self.agent_economies[agent_id]
+        economy = self.agent_reserves[agent_id]
         if not economy.is_dead():
             return False
         cooldown = self.settings.multi_agent_spectator_rounds
@@ -286,7 +286,7 @@ class SharedEconomy:
         if self.common_pool < fee:
             return False
         self.common_pool -= fee
-        economy.credit(fee)
+        economy.grant(fee)
         economy.state = AgentState.ACTIVE
         economy.starvation_counter = 0
         self.agent_debt[agent_id] = fee
@@ -300,40 +300,40 @@ class SharedEconomy:
         return True
 
     def get_agent_balance(self, agent_id: str) -> float:
-        return self.agent_economies[agent_id].get_balance()
+        return self.agent_reserves[agent_id].get_balance()
 
     def get_agent_state(self, agent_id: str) -> AgentState:
-        return self.agent_economies[agent_id].state
+        return self.agent_reserves[agent_id].state
 
     def get_common_pool(self) -> float:
         return self.common_pool
 
     def get_agent_ids(self) -> list[str]:
-        return list(self.agent_economies.keys())
+        return list(self.agent_reserves.keys())
 
-    def get_agent_economy(self, agent_id: str) -> CreditEconomy:
-        return self.agent_economies[agent_id]
+    def get_agent_economy(self, agent_id: str) -> AgentReserve:
+        return self.agent_reserves[agent_id]
 
     def get_agent_debt(self, agent_id: str) -> float:
         return self.agent_debt.get(agent_id, 0.0)
 
     def is_agent_stripped(self, agent_id: str) -> bool:
-        return self.agent_economies[agent_id].is_stripped()
+        return self.agent_reserves[agent_id].is_stripped()
 
     def is_agent_dead(self, agent_id: str) -> bool:
-        return self.agent_economies[agent_id].is_dead()
+        return self.agent_reserves[agent_id].is_dead()
 
     def transition_agent_to_stripped(self, agent_id: str) -> bool:
-        return self.agent_economies[agent_id].transition_to_stripped()
+        return self.agent_reserves[agent_id].transition_to_stripped()
 
     def tick_agent_starvation(self, agent_id: str) -> AgentState:
-        return self.agent_economies[agent_id].tick_starvation()
+        return self.agent_reserves[agent_id].tick_starvation()
 
     def get_agent_starvation_remaining(self, agent_id: str) -> int:
-        return self.agent_economies[agent_id].get_starvation_remaining()
+        return self.agent_reserves[agent_id].get_starvation_remaining()
 
     def get_living_agents(self) -> list[str]:
-        return [aid for aid, econ in self.agent_economies.items() if not econ.is_dead()]
+        return [aid for aid, econ in self.agent_reserves.items() if not econ.is_dead()]
 
     def get_agent_summaries(self) -> list[dict]:
         return [
@@ -344,5 +344,5 @@ class SharedEconomy:
                 "degradation": econ.get_degradation_level(),
                 "starvation_remaining": econ.get_starvation_remaining(),
             }
-            for aid, econ in self.agent_economies.items()
+            for aid, econ in self.agent_reserves.items()
         ]

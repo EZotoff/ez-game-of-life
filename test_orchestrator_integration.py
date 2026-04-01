@@ -18,7 +18,7 @@ def test_orchestrator_uses_prompt_manager():
     orchestrator = Orchestrator(
         agent_id="test-agent",
         container_id="test-container",
-        initial_balance=100.0,
+        initial_zod=100.0,
         tool_costs={"test_tool": 1.0},
         degradation_rate=0.1,
         max_empty_turns=5,
@@ -42,8 +42,8 @@ def test_orchestrator_uses_prompt_manager():
 
     # Verify prompt contains expected elements
     assert "test_tool" in prompt, "Prompt should contain tool names"
-    assert "1.0 credits" in prompt, "Prompt should contain tool costs"
-    assert "50.0 credits" in prompt, "Prompt should contain balance"
+    assert "1.0 zod" in prompt, "Prompt should contain tool costs"
+    assert "50.0 zod" in prompt, "Prompt should contain balance"
     assert "Turn: 3" in prompt, "Prompt should contain turn info"
     assert "State: ACTIVE" in prompt, "Prompt should contain state info"
 

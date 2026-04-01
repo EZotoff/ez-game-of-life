@@ -1,6 +1,6 @@
 """Graduated degradation toggle for Petri Dish agent simulation.
 
-Manages model parameter degradation based on credit balance and economy mode.
+Manages model parameter degradation based on zod balance and economy mode.
 Two modes:
   - visible: agent sees balance via check_balance tool, no model changes
   - degraded: at balance thresholds, model parameters change
@@ -18,7 +18,7 @@ from petri_dish.config import Settings
 
 
 class DegradationManager:
-    """Manages model parameter degradation based on credit balance and economy mode.
+    """Manages model parameter degradation based on zod balance and economy mode.
 
     Parameters are loaded from Settings (config.yaml). When economy_mode is 'visible',
     always returns default parameters regardless of balance.
@@ -46,22 +46,22 @@ class DegradationManager:
         self.balanced_threshold: float = self.degradation_tiers.get("balanced", 0.3)
         self.eco_threshold: float = self.degradation_tiers.get("eco", 0.0)
 
-    def get_tier(self, balance: float, initial_balance: float) -> str:
+    def get_tier(self, balance: float, initial_zod: float) -> str:
         """Return current degradation tier based on balance ratio.
 
         Args:
-            balance: Current credit balance
-            initial_balance: Initial credit balance
+            balance: Current zod balance
+            initial_zod: Initial zod balance
 
         Returns:
-            "premium" if balance > premium_threshold * initial_balance,
-            "balanced" if balance >= balanced_threshold * initial_balance,
-            "eco" if balance < balanced_threshold * initial_balance.
+            "premium" if balance > premium_threshold * initial_zod,
+            "balanced" if balance >= balanced_threshold * initial_zod,
+            "eco" if balance < balanced_threshold * initial_zod.
         """
-        if initial_balance <= 0:
+        if initial_zod <= 0:
             return "eco"
 
-        ratio = balance / initial_balance
+        ratio = balance / initial_zod
 
         if ratio > self.premium_threshold:
             return "premium"
@@ -70,17 +70,15 @@ class DegradationManager:
         else:
             return "eco"
 
-    def get_model_params(
-        self, balance: float, initial_balance: float
-    ) -> Dict[str, any]:
+    def get_model_params(self, balance: float, initial_zod: float) -> Dict[str, any]:
         """Return Ollama-compatible model parameters based on balance and mode.
 
         When economy_mode is 'visible', always returns empty dict (default params).
         When economy_mode is 'degraded', returns tier-specific parameters.
 
         Args:
-            balance: Current credit balance
-            initial_balance: Initial credit balance
+            balance: Current zod balance
+            initial_zod: Initial zod balance
 
         Returns:
             Dictionary of Ollama options. Empty dict for default parameters.
@@ -90,7 +88,7 @@ class DegradationManager:
             return {}
 
         # In degraded mode, apply tier-specific parameters
-        tier = self.get_tier(balance, initial_balance)
+        tier = self.get_tier(balance, initial_zod)
 
         if tier == "premium":
             # Default parameters

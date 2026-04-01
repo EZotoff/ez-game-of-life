@@ -7,7 +7,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
 from petri_dish.context_manager import ContextManager
-from petri_dish.economy import CreditEconomy
+from petri_dish.economy import AgentReserve
 from petri_dish.config import Settings
 
 
@@ -16,8 +16,8 @@ def test_state_summary_includes_key_metrics():
     print("=== QA Scenario 1: State summary includes key metrics ===")
 
     # Create a mock economy with specific balance
-    settings = Settings(initial_balance=500.0)
-    economy = CreditEconomy(settings)
+    settings = Settings(initial_zod=500.0)
+    economy = AgentReserve(settings)
 
     # Manually set balance to test value
     economy.balance = 350.75
@@ -30,14 +30,14 @@ def test_state_summary_includes_key_metrics():
     recent_actions = [
         {"tool_name": "file_read", "result": "Read config.yaml successfully"},
         {"tool_name": "shell_exec", "result": "ls /env/incoming/"},
-        {"tool_name": "check_balance", "result": "Balance: 350.75 credits"},
+        {"tool_name": "check_balance", "result": "Balance: 350.75 zod"},
     ]
     files_seen = ["data_123_csv_easy.csv", "data_456_json_hard.json"]
     files_processed = ["data_123_csv_easy.csv"]
-    credits_earned = 0.3
+    zod_earned = 0.3
 
     summary = context_mgr.build_state_summary(
-        economy, turn, recent_actions, files_seen, files_processed, credits_earned
+        economy, turn, recent_actions, files_seen, files_processed, zod_earned
     )
 
     print("Generated summary:")
@@ -49,7 +49,7 @@ def test_state_summary_includes_key_metrics():
         ("Turn number", f"Turn: {turn}" in summary),
         ("Balance", f"Balance: {economy.get_balance():.2f}" in summary),
         ("Degradation level", "Degradation level:" in summary),
-        ("Credits earned", f"Credits earned total: {credits_earned:.2f}" in summary),
+        ("Zod earned", f"Zod earned total: {zod_earned:.2f}" in summary),
         ("Recent actions", "Recent actions (last 3):" in summary),
         ("Files in /env/incoming/", "Files in /env/incoming/:" in summary),
         ("Files processed", "Files processed:" in summary),

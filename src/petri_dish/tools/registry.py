@@ -35,8 +35,8 @@ class ToolDefinition:
         parameters: List of ToolParameter definitions.
         handler: Callable that implements the tool logic.
         host_side: If True, runs on host (not in container).
-        cost: Credit cost per invocation (loaded from config).
-        free_when_stripped: If True, tool is available even when agent wallet is ≤ 0.
+        cost: Zod cost per invocation (loaded from config).
+        free_when_stripped: If True, tool is available even when agent reserve is ≤ 0.
     """
 
     name: str
@@ -154,13 +154,13 @@ class ToolRegistry:
         return list(self._tools.keys())
 
     def get_tool_cost(self, name: str) -> float:
-        """Get the credit cost for a tool invocation.
+        """Get the zod cost for a tool invocation.
 
         Args:
             name: Tool name.
 
         Returns:
-            Cost in credits, or 0.0 if unknown.
+            Cost in zod, or 0.0 if unknown.
         """
         tool = self._tools.get(name)
         if tool is not None:

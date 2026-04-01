@@ -47,7 +47,7 @@ class DashboardServer:
                 cursor = conn.cursor()
                 cursor.execute(
                     """
-                    SELECT id, turn, tool_name, tool_args, result, credits_before, credits_after, duration_ms, agent_id, timestamp 
+                    SELECT id, turn, tool_name, tool_args, result, zod_before, zod_after, duration_ms, agent_id, timestamp 
                     FROM actions 
                     WHERE run_id = ? 
                     ORDER BY turn DESC, timestamp DESC
@@ -73,7 +73,7 @@ class DashboardServer:
                 cursor.execute(
                     """
                     SELECT timestamp, amount, type, reason, balance_after, agent_id
-                    FROM credit_transactions
+                    FROM zod_transactions
                     WHERE run_id = ?
                     ORDER BY timestamp ASC, id ASC
                     """,
@@ -87,7 +87,7 @@ class DashboardServer:
                 cursor = conn.cursor()
                 cursor.execute(
                     """
-                    SELECT id, filename, file_type, status, dropped_at, processed_at, credits_earned
+                    SELECT id, filename, file_type, status, dropped_at, processed_at, zod_earned
                     FROM files
                     WHERE run_id = ?
                     ORDER BY dropped_at DESC
@@ -129,7 +129,7 @@ class DashboardServer:
                 )
 
                 cursor.execute(
-                    "SELECT balance_after FROM credit_transactions WHERE run_id = ? ORDER BY timestamp DESC, id DESC LIMIT 1",
+                    "SELECT balance_after FROM zod_transactions WHERE run_id = ? ORDER BY timestamp DESC, id DESC LIMIT 1",
                     (run_id,),
                 )
                 bal_row = cursor.fetchone()
@@ -146,7 +146,7 @@ class DashboardServer:
                 for a_row in agents_rows:
                     a_id = a_row["agent_id"]
                     cursor.execute(
-                        "SELECT balance_after FROM credit_transactions WHERE run_id = ? AND agent_id = ? ORDER BY timestamp DESC, id DESC LIMIT 1",
+                        "SELECT balance_after FROM zod_transactions WHERE run_id = ? AND agent_id = ? ORDER BY timestamp DESC, id DESC LIMIT 1",
                         (run_id, a_id),
                     )
                     a_bal_row = cursor.fetchone()
@@ -195,7 +195,7 @@ class DashboardServer:
                 cursor = conn.cursor()
                 cursor.execute(
                     """
-                    SELECT id, round_num, agent_id, event_type, details, credit_delta, timestamp 
+                    SELECT id, round_num, agent_id, event_type, details, zod_delta, timestamp 
                     FROM event_ledger WHERE run_id = ? ORDER BY timestamp DESC LIMIT 50
                     """,
                     (run_id,),
@@ -247,7 +247,7 @@ class DashboardServer:
 
                             cursor.execute(
                                 """
-                                SELECT id, turn, tool_name, tool_args, result, credits_before, credits_after, duration_ms, agent_id, timestamp 
+                                SELECT id, turn, tool_name, tool_args, result, zod_before, zod_after, duration_ms, agent_id, timestamp 
                                 FROM actions 
                                 WHERE run_id = ? AND id > ? 
                                 ORDER BY id ASC
@@ -272,7 +272,7 @@ class DashboardServer:
                             cursor.execute(
                                 """
                                 SELECT id, timestamp, amount, type, reason, balance_after, agent_id
-                                FROM credit_transactions
+                                FROM zod_transactions
                                 WHERE run_id = ? AND id > ?
                                 ORDER BY id ASC
                                 """,
@@ -305,7 +305,7 @@ class DashboardServer:
 
                             cursor.execute(
                                 """
-                                SELECT id, round_num, agent_id, event_type, details, credit_delta, timestamp
+                                SELECT id, round_num, agent_id, event_type, details, zod_delta, timestamp
                                 FROM event_ledger
                                 WHERE run_id = ? AND id > ?
                                 ORDER BY id ASC
@@ -322,7 +322,7 @@ class DashboardServer:
 
                             cursor.execute(
                                 """
-                                SELECT status, COUNT(*) as count, SUM(credits_earned) as total_credits
+                                SELECT status, COUNT(*) as count, SUM(zod_earned) as total_zod
                                 FROM files 
                                 WHERE run_id = ? 
                                 GROUP BY status
@@ -333,7 +333,7 @@ class DashboardServer:
                             for row in cursor.fetchall():
                                 stats["by_status"][row["status"]] = {
                                     "count": row["count"],
-                                    "total_credits": row["total_credits"] or 0.0,
+                                    "total_zod": row["total_zod"] or 0.0,
                                 }
 
                             cursor.execute(
@@ -341,7 +341,7 @@ class DashboardServer:
                                 SELECT 
                                     COUNT(*) as total_files,
                                     SUM(CASE WHEN status = 'processed' THEN 1 ELSE 0 END) as processed_files,
-                                    SUM(credits_earned) as total_credits_earned
+                                    SUM(zod_earned) as total_zod_earned
                                 FROM files 
                                 WHERE run_id = ?
                                 """,

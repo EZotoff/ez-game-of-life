@@ -16,8 +16,8 @@ class Settings(BaseSettings):
     )
 
     # Economy and Game Parameters
-    initial_balance: float = 1000.0
-    burn_rate_per_turn: float = 0.1
+    initial_zod: float = 1000.0
+    decay_rate_per_turn: float = 0.1
     file_drop_lambda: float = 0.02
     file_drop_interval_turns: int = 50
     max_turns: int = 1000
@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     # File System Parameters
     num_file_families: int = 3
     validator_scoring_weights: Dict[str, float] = {"csv": 1.0, "json": 1.0, "log": 1.0}
-    credit_rewards: Dict[str, float] = {"easy": 0.3, "hard": 2.0}
+    zod_rewards: Dict[str, float] = {"easy": 0.3, "hard": 2.0}
 
     # Null Model Configuration
     null_model_type: Literal["random", "constant", "none"] = "random"
@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     multi_agent_shared_filesystem: bool = True
     multi_agent_actions_per_turn: int = 4
     multi_agent_death_forfeit_pct: float = 0.6
-    multi_agent_burn_pct: float = 0.3
+    multi_agent_decay_pct: float = 0.3
     multi_agent_salvage_pct: float = 0.3
     multi_agent_reentry_fee: float = 20.0
     multi_agent_spectator_rounds: int = 2

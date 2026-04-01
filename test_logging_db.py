@@ -39,7 +39,7 @@ def test_database_initialization():
         print(f"Tables found: {sorted(tables)}")
 
         # Check for required tables
-        required_tables = {"runs", "actions", "files", "credit_transactions"}
+        required_tables = {"runs", "actions", "files", "zod_transactions"}
         missing_tables = required_tables - set(tables)
 
         if missing_tables:
@@ -111,8 +111,8 @@ def test_action_logging():
             tool_name="bash",
             tool_args={"command": "ls -la", "description": "List files"},
             result="total 32\ndrwxr-xr-x ...",
-            credits_before=100.0,
-            credits_after=95.0,
+            zod_before=100.0,
+            zod_after=95.0,
             duration_ms=150,
         )
 
@@ -122,8 +122,8 @@ def test_action_logging():
             tool_name="read",
             tool_args={"filePath": "/tmp/test.txt"},
             result="File contents...",
-            credits_before=95.0,
-            credits_after=90.0,
+            zod_before=95.0,
+            zod_after=90.0,
             duration_ms=50,
         )
 
@@ -142,7 +142,7 @@ def test_action_logging():
             print(f"\nAction {i}:")
             print(f"  Turn: {action['turn']}")
             print(f"  Tool: {action['tool_name']}")
-            print(f"  Credits: {action['credits_before']} → {action['credits_after']}")
+            print(f"  Zod: {action['zod_before']} → {action['zod_after']}")
             print(f"  Duration: {action['duration_ms']}ms")
 
         # Test file logging
@@ -150,20 +150,20 @@ def test_action_logging():
         db.log_file_drop(run_id, "config.yaml", "config")
         db.log_file_process(run_id, "test.py", 10.5)
 
-        # Test credit logging
-        db.log_credit(run_id, 100.0, "initial_balance", "Starting credits")
-        db.log_credit(run_id, -5.0, "tool_cost", "bash command")
-        db.log_credit(run_id, 10.5, "file_processed", "test.py processed")
+        # Test zod logging
+        db.log_zod_transaction(run_id, 100.0, "initial_zod", "Starting zod")
+        db.log_zod_transaction(run_id, -5.0, "tool_cost", "bash command")
+        db.log_zod_transaction(run_id, 10.5, "file_processed", "test.py processed")
 
         # Get balance history
         balance_history = db.get_balance_history(run_id)
         print(f"\nBalance history has {len(balance_history)} transactions")
 
         if len(balance_history) != 3:
-            print(f"ERROR: Expected 3 credit transactions, got {len(balance_history)}")
+            print(f"ERROR: Expected 3 zod transactions, got {len(balance_history)}")
             return False
 
-        print("✓ Credit transactions logged successfully")
+        print("✓ Zod transactions logged successfully")
 
         # Verify final balance
         final_balance = balance_history[-1]["balance_after"]
@@ -295,8 +295,8 @@ def generate_evidence():
                 "tool": "bash",
                 "args": {"command": "pwd", "description": "Get current directory"},
                 "result": "/home/ezotoff/projects/petri-dish",
-                "credits_before": 100.0,
-                "credits_after": 99.5,
+                "zod_before": 100.0,
+                "zod_after": 99.5,
                 "duration": 100,
             },
             {
@@ -304,8 +304,8 @@ def generate_evidence():
                 "tool": "read",
                 "args": {"filePath": "src/petri_dish/logging_db.py"},
                 "result": "class LoggingDB: ...",
-                "credits_before": 99.5,
-                "credits_after": 99.0,
+                "zod_before": 99.5,
+                "zod_after": 99.0,
                 "duration": 75,
             },
             {
@@ -313,8 +313,8 @@ def generate_evidence():
                 "tool": "write",
                 "args": {"filePath": "test_output.txt", "content": "Test content"},
                 "result": "File written successfully",
-                "credits_before": 99.0,
-                "credits_after": 98.5,
+                "zod_before": 99.0,
+                "zod_after": 98.5,
                 "duration": 200,
             },
         ]
@@ -326,21 +326,20 @@ def generate_evidence():
                 tool_name=action["tool"],
                 tool_args=action["args"],
                 result=action["result"],
-                credits_before=action["credits_before"],
-                credits_after=action["credits_after"],
+                zod_before=action["zod_before"],
+                zod_after=action["zod_after"],
                 duration_ms=action["duration"],
             )
 
-        # Log files and credits
         db.log_file_drop(run_id, "logging_db.py", "python")
         db.log_file_drop(run_id, "config.yaml", "yaml")
         db.log_file_process(run_id, "logging_db.py", 25.0)
 
-        db.log_credit(run_id, 100.0, "initial", "Initial balance")
-        db.log_credit(run_id, -0.5, "tool", "bash command")
-        db.log_credit(run_id, -0.5, "tool", "read file")
-        db.log_credit(run_id, -0.5, "tool", "write file")
-        db.log_credit(run_id, 25.0, "file", "logging_db.py processed")
+        db.log_zod_transaction(run_id, 100.0, "initial", "Initial balance")
+        db.log_zod_transaction(run_id, -0.5, "tool", "bash command")
+        db.log_zod_transaction(run_id, -0.5, "tool", "read file")
+        db.log_zod_transaction(run_id, -0.5, "tool", "write file")
+        db.log_zod_transaction(run_id, 25.0, "file", "logging_db.py processed")
 
         # Retrieve and display logged data
         action_info.append(f"Run ID: {run_id}")
@@ -356,9 +355,7 @@ def generate_evidence():
             action_info.append(f"  Turn: {action['turn']}")
             action_info.append(f"  Tool: {action['tool_name']}")
             action_info.append(f"  Duration: {action['duration_ms']}ms")
-            action_info.append(
-                f"  Credits: {action['credits_before']} → {action['credits_after']}"
-            )
+            action_info.append(f"  Zod: {action['zod_before']} → {action['zod_after']}")
             if action["tool_args"]:
                 args_str = json.dumps(action["tool_args"], indent=2).replace(
                     "\n", "\n    "
@@ -368,7 +365,7 @@ def generate_evidence():
 
         # Get balance history
         balance_history = db.get_balance_history(run_id)
-        action_info.append(f"Credit transactions: {len(balance_history)}")
+        action_info.append(f"Zod transactions: {len(balance_history)}")
         action_info.append("")
 
         for i, tx in enumerate(balance_history, 1):
@@ -387,14 +384,14 @@ def generate_evidence():
         action_info.append(f"  Total files: {file_stats.get('total_files', 0)}")
         action_info.append(f"  Processed files: {file_stats.get('processed_files', 0)}")
         action_info.append(
-            f"  Total credits earned: {file_stats.get('total_credits_earned', 0):.2f}"
+            f"  Total zod earned: {file_stats.get('total_zod_earned', 0):.2f}"
         )
 
         if "by_status" in file_stats:
             action_info.append("  Files by status:")
             for status, stats in file_stats["by_status"].items():
                 action_info.append(
-                    f"    {status}: {stats['count']} files, {stats['total_credits']:.2f} credits"
+                    f"    {status}: {stats['count']} files, {stats['total_zod']:.2f} zod"
                 )
 
         # Write action logging evidence

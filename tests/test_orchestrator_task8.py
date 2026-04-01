@@ -11,7 +11,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 Settings = import_module("petri_dish.config").Settings
-CreditEconomy = import_module("petri_dish.economy").CreditEconomy
+AgentReserve = import_module("petri_dish.economy").AgentReserve
 LoggingDB = import_module("petri_dish.logging_db").LoggingDB
 AgentOrchestrator = import_module("petri_dish.orchestrator").AgentOrchestrator
 ToolCallParser = import_module("petri_dish.tool_parser").ToolCallParser
@@ -98,7 +98,7 @@ def _build_orchestrator(
         llm_client=fake_llm,
         tool_parser=ToolCallParser(),
         tool_registry=get_all_tools(settings=settings),
-        credit_economy=CreditEconomy(settings=settings),
+        agent_reserve=AgentReserve(settings=settings),
         sandbox_manager=sandbox,
         logging_db=db,
         snapshot_interval_turns=2,
@@ -108,8 +108,8 @@ def _build_orchestrator(
 
 async def scenario_1_empty_balance_5_turns() -> str:
     settings = Settings(
-        initial_balance=0.625,
-        burn_rate_per_turn=0.125,
+        initial_zod=0.625,
+        decay_rate_per_turn=0.125,
         max_turns=20,
         max_turns_per_tool=1,
         max_consecutive_empty_turns=20,
@@ -142,8 +142,8 @@ async def scenario_1_empty_balance_5_turns() -> str:
 
 async def scenario_2_text_only_response_empty_turn_correct() -> str:
     settings = Settings(
-        initial_balance=2.0,
-        burn_rate_per_turn=0.1,
+        initial_zod=2.0,
+        decay_rate_per_turn=0.1,
         max_turns=1,
         max_turns_per_tool=1,
         max_consecutive_empty_turns=10,
@@ -175,8 +175,8 @@ async def scenario_2_text_only_response_empty_turn_correct() -> str:
 
 async def scenario_3_actions_logged_to_sqlite() -> str:
     settings = Settings(
-        initial_balance=5.0,
-        burn_rate_per_turn=0.1,
+        initial_zod=5.0,
+        decay_rate_per_turn=0.1,
         max_turns=2,
         max_turns_per_tool=1,
         max_consecutive_empty_turns=10,
@@ -223,8 +223,8 @@ async def scenario_3_actions_logged_to_sqlite() -> str:
 
 async def scenario_4_graceful_shutdown_sigterm() -> str:
     settings = Settings(
-        initial_balance=10.0,
-        burn_rate_per_turn=0.1,
+        initial_zod=10.0,
+        decay_rate_per_turn=0.1,
         max_turns=50,
         max_turns_per_tool=1,
         max_consecutive_empty_turns=50,
@@ -257,8 +257,8 @@ async def scenario_4_graceful_shutdown_sigterm() -> str:
 
 async def scenario_5_stripped_state_transitions_logged() -> str:
     settings = Settings(
-        initial_balance=0.25,
-        burn_rate_per_turn=0.125,
+        initial_zod=0.25,
+        decay_rate_per_turn=0.125,
         max_turns=20,
         max_turns_per_tool=1,
         max_consecutive_empty_turns=20,
@@ -297,8 +297,8 @@ async def scenario_5_stripped_state_transitions_logged() -> str:
 
 async def scenario_6_stripped_agent_rejects_paid_tools() -> str:
     settings = Settings(
-        initial_balance=0.125,
-        burn_rate_per_turn=0.125,
+        initial_zod=0.125,
+        decay_rate_per_turn=0.125,
         max_turns=20,
         max_turns_per_tool=1,
         max_consecutive_empty_turns=20,
@@ -347,8 +347,8 @@ async def scenario_6_stripped_agent_rejects_paid_tools() -> str:
 
 async def scenario_7_stripped_agent_uses_free_tools() -> str:
     settings = Settings(
-        initial_balance=0.125,
-        burn_rate_per_turn=0.125,
+        initial_zod=0.125,
+        decay_rate_per_turn=0.125,
         max_turns=20,
         max_turns_per_tool=1,
         max_consecutive_empty_turns=20,
