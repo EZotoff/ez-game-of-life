@@ -11,7 +11,7 @@ Implements WAL mode for concurrent reads/writes with:
 import sqlite3
 import json
 import contextlib
-from typing import Optional, Dict, Any, List, Iterator
+from typing import Optional, Dict, Any, List, Generator
 
 
 class LoggingDB:
@@ -179,6 +179,31 @@ class LoggingDB:
             )
         """)
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS scout_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                turn INTEGER NOT NULL,
+                agent_id TEXT DEFAULT NULL,
+                report_id TEXT NOT NULL,
+                requesting_agent_id TEXT NOT NULL,
+                target_filename TEXT DEFAULT NULL,
+                file_family TEXT NOT NULL,
+                claimed_pattern TEXT NOT NULL,
+                output_summary TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                verdict TEXT NOT NULL,
+                reasoning TEXT,
+                suggested_bonus REAL NOT NULL DEFAULT 0,
+                report_json TEXT NOT NULL,
+                applied INTEGER NOT NULL DEFAULT 0,
+                applied_bonus REAL DEFAULT NULL,
+                applied_turn INTEGER DEFAULT NULL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+            )
+        """)
+
         # Create indexes for performance
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_actions_run_id ON actions(run_id)"
@@ -217,6 +242,12 @@ class LoggingDB:
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_event_ledger_agent ON event_ledger(agent_id)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_scout_reports_run_id ON scout_reports(run_id)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_scout_reports_lookup ON scout_reports(run_id, agent_id, target_filename, applied)"
         )
 
         conn.commit()
@@ -665,8 +696,152 @@ class LoggingDB:
         cursor.execute(query, params)
         return [dict(row) for row in cursor.fetchall()]
 
+    def log_scout_report(
+        self,
+        run_id: str,
+        turn: int,
+        report: Dict[str, Any],
+        report_json: str,
+        *,
+        agent_id: Optional[str] = None,
+        target_filename: Optional[str] = None,
+    ) -> int:
+        conn = self._ensure_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO scout_reports
+                (
+                    run_id,
+                    turn,
+                    agent_id,
+                    report_id,
+                    requesting_agent_id,
+                    target_filename,
+                    file_family,
+                    claimed_pattern,
+                    output_summary,
+                    confidence,
+                    verdict,
+                    reasoning,
+                    suggested_bonus,
+                    report_json
+                )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run_id,
+                turn,
+                agent_id,
+                str(report.get("report_id", "")),
+                str(report.get("requesting_agent_id", "unknown")),
+                target_filename,
+                str(report.get("file_family", "")),
+                str(report.get("claimed_pattern", "")),
+                str(report.get("output_summary", "")),
+                float(report.get("confidence", 0.0)),
+                str(report.get("verdict", "no_sources")),
+                str(report.get("reasoning", "")),
+                float(report.get("suggested_bonus", 0.0)),
+                report_json,
+            ),
+        )
+        conn.commit()
+        return int(cursor.lastrowid or 0)
+
+    def get_pending_scout_report_for_file(
+        self,
+        run_id: str,
+        filename: str,
+        *,
+        agent_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        conn = self._ensure_connection()
+        cursor = conn.cursor()
+        if agent_id is None:
+            cursor.execute(
+                """
+                SELECT *
+                FROM scout_reports
+                WHERE run_id = ?
+                  AND target_filename = ?
+                  AND agent_id IS NULL
+                  AND applied = 0
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (run_id, filename),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT *
+                FROM scout_reports
+                WHERE run_id = ?
+                  AND target_filename = ?
+                  AND agent_id = ?
+                  AND applied = 0
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (run_id, filename, agent_id),
+            )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def mark_scout_report_applied(
+        self,
+        scout_report_row_id: int,
+        *,
+        applied_turn: int,
+        applied_bonus: float,
+    ) -> None:
+        conn = self._ensure_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE scout_reports
+            SET applied = 1,
+                applied_turn = ?,
+                applied_bonus = ?
+            WHERE id = ?
+            """,
+            (applied_turn, applied_bonus, scout_report_row_id),
+        )
+        conn.commit()
+
+    def get_scout_reports(
+        self,
+        run_id: str,
+        *,
+        agent_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        conn = self._ensure_connection()
+        cursor = conn.cursor()
+        if agent_id is None:
+            cursor.execute(
+                """
+                SELECT *
+                FROM scout_reports
+                WHERE run_id = ?
+                ORDER BY id ASC
+                """,
+                (run_id,),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT *
+                FROM scout_reports
+                WHERE run_id = ? AND agent_id = ?
+                ORDER BY id ASC
+                """,
+                (run_id, agent_id),
+            )
+        return [dict(row) for row in cursor.fetchall()]
+
     @contextlib.contextmanager
-    def read_only_connection(self) -> Iterator[sqlite3.Connection]:
+    def read_only_connection(self) -> Generator[sqlite3.Connection, None, None]:
         """
         Context manager for read-only connection (for dashboard).
 

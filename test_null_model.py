@@ -24,7 +24,7 @@ async def test_null_model_basic() -> None:
     print("=== Test 1: Basic Null Model Functionality ===")
 
     # Create null model with fixed seed for reproducibility
-    model = NullModel(seed=42)
+    model = NullModel(seed=42, null_model_type="random")
 
     # Get tool schemas
     tools = get_tool_schemas()
@@ -59,11 +59,11 @@ async def test_null_model_reproducibility() -> None:
     messages = [{"role": "user", "content": "Test"}]
 
     # First run with seed 123
-    model1 = NullModel(seed=123)
+    model1 = NullModel(seed=123, null_model_type="random")
     _, calls1 = await model1.chat(system_prompt, messages, tools)
 
     # Second run with same seed
-    model2 = NullModel(seed=123)
+    model2 = NullModel(seed=123, null_model_type="random")
     _, calls2 = await model2.chat(system_prompt, messages, tools)
 
     print(f"Model 1 seed: {model1.get_seed()}")
@@ -103,8 +103,8 @@ async def test_null_model_different_seeds() -> None:
     messages = [{"role": "user", "content": "Test"}]
 
     # Run with different seeds
-    model1 = NullModel(seed=100)
-    model2 = NullModel(seed=200)
+    model1 = NullModel(seed=100, null_model_type="random")
+    model2 = NullModel(seed=200, null_model_type="random")
 
     _, calls1 = await model1.chat(system_prompt, messages, tools)
     _, calls2 = await model2.chat(system_prompt, messages, tools)
@@ -137,7 +137,7 @@ async def test_null_model_argument_validity() -> None:
     print("=== Test 4: Argument Validity Check ===")
 
     tools = get_tool_schemas()
-    model = NullModel(seed=999)
+    model = NullModel(seed=999, null_model_type="random")
 
     # Run multiple times to test different tools
     tool_results = {}
@@ -167,7 +167,7 @@ async def test_null_model_no_tools() -> None:
     """Test null model behavior when no tools are provided."""
     print("=== Test 5: No Tools Provided ===")
 
-    model = NullModel(seed=42)
+    model = NullModel(seed=42, null_model_type="random")
     response_text, tool_calls = await model.chat(
         "Test",
         [{"role": "user", "content": "Test"}],
@@ -175,14 +175,126 @@ async def test_null_model_no_tools() -> None:
     )
 
     print(f"Response text: '{response_text}'")
-    print(f"Tool calls: {tool_calls}")
-    print(f"Expected: empty string and empty list")
+    print(f"Number of tool calls: {len(tool_calls)}")
+    assert response_text == ""
+    assert tool_calls == []
+    print()
 
-    if response_text == "" and tool_calls == []:
-        print("✓ Correctly handles empty tools list")
-    else:
-        print("✗ Incorrect handling of empty tools list")
 
+async def test_null_model_overseer_smoke() -> None:
+    """Test overseer_smoke mode forces overseer_scout tool call."""
+    print("=== Test 6: Overseer Smoke Mode ===")
+
+    # Create a mock tool list that includes overseer_scout
+    mock_tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "overseer_scout",
+                "description": "Scout for information",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "claimed_pattern": {"type": "string"},
+                        "output_summary": {"type": "string"},
+                        "file_family": {"type": "string"},
+                        "search_queries": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "requesting_agent_id": {"type": "string"},
+                        "turn_id": {"type": "integer"},
+                        "settings": {"type": "object"},
+                    },
+                    "required": [
+                        "claimed_pattern",
+                        "output_summary",
+                        "file_family",
+                        "search_queries",
+                    ],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "file_read",
+                "description": "Read a file",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
+            },
+        },
+    ]
+
+    # Test with overseer_smoke mode
+    model = NullModel(seed=42, null_model_type="overseer_smoke")
+
+    # First call should force overseer_scout
+    response_text, tool_calls = await model.chat(
+        "Test",
+        [{"role": "user", "content": "Test"}],
+        mock_tools,
+    )
+
+    print(f"First call - Response text: '{response_text}'")
+    print(f"First call - Number of tool calls: {len(tool_calls)}")
+
+    if tool_calls:
+        tool_call = tool_calls[0]
+        tool_name = tool_call["function"]["name"]
+        print(f"First call - Tool name: {tool_name}")
+        assert tool_name == "overseer_scout", (
+            f"Expected overseer_scout, got {tool_name}"
+        )
+
+    # Second call should fall back to random selection
+    response_text2, tool_calls2 = await model.chat(
+        "Test",
+        [{"role": "user", "content": "Test"}],
+        mock_tools,
+    )
+
+    print(f"Second call - Response text: '{response_text2}'")
+    print(f"Second call - Number of tool calls: {len(tool_calls2)}")
+
+    if tool_calls2:
+        tool_call2 = tool_calls2[0]
+        tool_name2 = tool_call2["function"]["name"]
+        print(f"Second call - Tool name: {tool_name2}")
+        # Could be overseer_scout or file_read (random selection)
+        # Just verify we got a valid tool call
+
+    # Test fallback when overseer_scout not available
+    mock_tools_no_overseer = [
+        {
+            "type": "function",
+            "function": {
+                "name": "file_read",
+                "description": "Read a file",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
+            },
+        }
+    ]
+
+    model2 = NullModel(seed=42, null_model_type="overseer_smoke")
+    response_text3, tool_calls3 = await model2.chat(
+        "Test",
+        [{"role": "user", "content": "Test"}],
+        mock_tools_no_overseer,
+    )
+
+    print(f"No overseer available - Response text: '{response_text3}'")
+    print(f"No overseer available - Number of tool calls: {len(tool_calls3)}")
+    assert len(tool_calls3) == 1  # Should still generate a tool call
+
+    print("Overseer smoke mode test passed!")
     print()
 
 
@@ -195,6 +307,7 @@ async def main() -> None:
     await test_null_model_different_seeds()
     await test_null_model_argument_validity()
     await test_null_model_no_tools()
+    await test_null_model_overseer_smoke()
 
     print("=== All Tests Complete ===")
 

@@ -4,8 +4,6 @@ Provides get_all_tools() to build a fully-wired ToolRegistry
 with all 12 agent tools registered (8 base + 2 communication + 2 new).
 """
 
-from typing import Optional
-
 from petri_dish.config import Settings
 from petri_dish.tools.registry import ToolDefinition, ToolParameter, ToolRegistry
 from petri_dish.tools import container_tools, host_tools, agent_tools, comm_tools
@@ -142,6 +140,55 @@ def _build_tool_definitions() -> list[ToolDefinition]:
             host_side=True,
         ),
         ToolDefinition(
+            name="overseer_scout",
+            description=(
+                "Request bounded read-only external validation via DuckDuckGo Instant "
+                "Answer API. Returns a structured scout report with confidence and "
+                "verdict."
+            ),
+            parameters=[
+                ToolParameter(
+                    name="claimed_pattern",
+                    type="string",
+                    description="Pattern or rule you claim the output follows",
+                ),
+                ToolParameter(
+                    name="output_summary",
+                    type="string",
+                    description="Brief summary of produced output",
+                ),
+                ToolParameter(
+                    name="file_family",
+                    type="string",
+                    description="Family of file under validation",
+                    enum=["csv", "json", "log"],
+                ),
+                ToolParameter(
+                    name="search_queries",
+                    type="array",
+                    description="Optional list of search queries (max configured)",
+                    required=False,
+                    default=[],
+                ),
+                ToolParameter(
+                    name="requesting_agent_id",
+                    type="string",
+                    description="Agent id requesting the scout report",
+                    required=False,
+                    default="unknown",
+                ),
+                ToolParameter(
+                    name="turn_id",
+                    type="string",
+                    description="Optional turn identifier for per-turn cap enforcement",
+                    required=False,
+                ),
+            ],
+            handler=host_tools.overseer_scout,
+            host_side=True,
+            free_when_stripped=False,
+        ),
+        ToolDefinition(
             name="self_modify",
             description="Modify your own system prompt by setting a key-value override.",
             parameters=[
@@ -197,7 +244,7 @@ def _build_tool_definitions() -> list[ToolDefinition]:
     ]
 
 
-def get_all_tools(settings: Optional[Settings] = None) -> ToolRegistry:
+def get_all_tools(settings: Settings | None = None) -> ToolRegistry:
     """Build and return a ToolRegistry with all 10 tools registered.
 
     Args:

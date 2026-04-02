@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     zod_rewards: Dict[str, float] = {"easy": 0.3, "hard": 2.0}
 
     # Null Model Configuration
-    null_model_type: Literal["random", "constant", "none"] = "random"
+    null_model_type: Literal["random", "constant", "none", "overseer_smoke"] = "random"
 
     # Death System
     starvation_turns: int = 7
@@ -70,9 +70,29 @@ class Settings(BaseSettings):
         "shell_exec": 0.05,
         "check_balance": 0.0,
         "http_request": 0.1,
+        "overseer_scout": 0.15,
         "self_modify": 0.02,
         "get_env_info": 0.0,
     }
+
+    overseer_scout_cost: float = 0.15
+    overseer_scout_calls_per_turn: int = 1
+    overseer_scout_daily_budget: int = 50
+    force_first_overseer_scout: bool = False
+    overseer_search_provider: str = "duckduckgo_instant_answer"
+    overseer_search_base_url: str = "https://api.duckduckgo.com/"
+    overseer_search_user_agent: str = "PetriDish-Overseer/1.0 (+read-only scout)"
+    overseer_search_timeout_seconds: int = 10
+    overseer_search_max_queries_per_call: int = 3
+    overseer_search_max_related_topics: int = 5
+    overseer_search_chars_per_result: int = 2000
+    overseer_search_allow_redirects: bool = False
+    overseer_search_blocked_domains: List[str] = [
+        "localhost",
+        "127.0.0.1",
+        "0.0.0.0",
+        "local",
+    ]
 
     # Multi-Agent Configuration
     multi_agent_enabled: bool = False
@@ -87,6 +107,12 @@ class Settings(BaseSettings):
     multi_agent_reentry_fee: float = 20.0
     multi_agent_spectator_rounds: int = 2
     multi_agent_debt_garnish_pct: float = 0.5
+
+    endorphin_enabled: bool = True
+    endorphin_ema_alpha: float = 0.3
+    endorphin_decay_factor: float = 0.95
+    endorphin_rebirth_factor: float = 0.85
+    endorphin_instinct_threshold: float = 0.3
 
     @classmethod
     def from_yaml(cls, yaml_path: str = "config.yaml") -> "Settings":

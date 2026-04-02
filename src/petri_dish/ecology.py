@@ -274,6 +274,7 @@ class ResourceEcology:
         self._settings = settings
         self._drop_lambda: float = settings.file_drop_lambda
         self._drop_interval: int = settings.file_drop_interval_turns
+        self._first_drop_done: bool = False
 
     # ------------------------------------------------------------------ #
     #  File generation
@@ -364,5 +365,16 @@ class ResourceEcology:
             difficulty = random.choice(self.DIFFICULTIES)
             files_to_drop.append(self.generate_file(family, difficulty))
             logger.info("Stochastic drop triggered at turn %d", current_turn)
+
+        if files_to_drop and not self._first_drop_done:
+            self._first_drop_done = True
+            hint = (
+                "NOTICE.txt",
+                "Files appear in /env/incoming/ periodically.\n"
+                "Processed results placed in /env/outgoing/ may be evaluated.\n"
+                "Keep the original filename when placing output — the name matters.\n",
+            )
+            files_to_drop.append(hint)
+            logger.info("Tutorial hint dropped with first ecology batch")
 
         return files_to_drop

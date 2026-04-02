@@ -1,0 +1,80 @@
+# 3-agent scarcity experiment — designed for death/rebirth cycles
+# Expected: ~200 rounds in ~40-50 min on local Ollama
+
+initial_zod: 80
+decay_rate_per_turn: 1.0
+max_turns: 200
+starvation_turns: 7
+memory_path: .sisyphus/memory
+
+model_name: "hf.co/bartowski/Qwen_Qwen3-30B-A3B-Instruct-2507-GGUF:IQ3_XS"
+ollama_base_url: "http://localhost:11434"
+default_temperature: 0.7
+llm_backend: openai_compatible
+openai_api_base_url: "https://api.z.ai/api/coding/paas/v4"
+openai_api_key_env_var: "ZAI_API_KEY"
+openai_model_name: "glm-5"
+
+docker_image: "python:3.12-slim"
+docker_mem_limit: "256m"
+docker_cpu_quota: 50000
+docker_storage_limit: "512m"
+
+economy_mode: "visible"
+file_drop_lambda: 0.3
+file_drop_interval_turns: 3
+max_turns_per_tool: 1
+turn_timeout_seconds: 60
+max_consecutive_empty_turns: 10
+context_window_tokens: 8192
+context_summary_interval_turns: 40
+
+tool_costs:
+  file_read: 0.0
+  file_write: 0.5
+  file_list: 0.1
+  shell_exec: 1.0
+  python_exec: 1.0
+  http_request: 1.0
+  check_balance: 0.0
+  self_modify: 0.2
+  get_env_info: 0.0
+  send_message: 0.0
+  read_messages: 0.0
+  pass_turn: 0.01
+
+degradation_tiers:
+  premium: 0.6
+  balanced: 0.3
+  eco: 0.0
+
+num_file_families: 3
+validator_scoring_weights:
+  csv: 1.0
+  json: 1.0
+  log: 1.0
+zod_rewards:
+  easy: 15.0
+  hard: 30.0
+
+null_model_type: "random"
+
+# Multi-agent config
+multi_agent_enabled: true
+multi_agent_count: 3
+multi_agent_models: []
+multi_agent_names: ["alice", "bob", "carol"]
+multi_agent_shared_filesystem: true
+multi_agent_actions_per_turn: 4
+multi_agent_death_forfeit_pct: 0.6
+multi_agent_decay_pct: 0.3
+multi_agent_salvage_pct: 0.3
+multi_agent_reentry_fee: 18
+multi_agent_spectator_rounds: 2
+multi_agent_debt_garnish_pct: 0.5
+
+endorphin_enabled: true
+endorphin_ema_alpha: 0.3
+endorphin_decay_factor: 0.95
+endorphin_rebirth_factor: 0.85
+endorphin_instinct_threshold: 0.3

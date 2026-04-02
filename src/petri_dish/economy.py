@@ -78,7 +78,7 @@ class AgentReserve:
 
         cost = self.decay_rate_per_turn * turns
         old_balance = self.balance
-        self.balance -= cost
+        self.balance = max(0.0, self.balance - cost)
         logger.info(
             "CONSUME: %.4f zod (turns=%d, rate=%.4f) | %.2f -> %.2f",
             cost,
@@ -99,7 +99,7 @@ class AgentReserve:
             New balance after grant.
         """
         old_balance = self.balance
-        self.balance += amount
+        self.balance = max(0.0, self.balance + amount)
         if amount > 0:
             self.lifetime_zod_earned += amount
         logger.info(

@@ -102,7 +102,7 @@ def _resolve_db_path(run_id: str) -> str:
 
 def _create_llm_client(settings: Settings, null_model: bool) -> _ChatClient:
     if null_model:
-        return NullModel()
+        return NullModel(null_model_type=settings.null_model_type)
 
     if settings.llm_backend == "openai_compatible":
         api_key = os.getenv(settings.openai_api_key_env_var, "")

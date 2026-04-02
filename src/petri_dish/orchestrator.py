@@ -15,6 +15,7 @@ from types import FrameType
 from typing import Any
 
 from petri_dish.config import Settings
+from petri_dish.endorphin import EndorphinEngine
 from petri_dish.economy import AgentState, AgentReserve
 from petri_dish.llm_client import OllamaClient
 from petri_dish.logging_db import LoggingDB
@@ -52,6 +53,7 @@ class RunResult:
 class _ToolCallPayload:
     name: str
     arguments: dict[str, Any]
+    id: str = ""
 
 
 class AgentOrchestrator:
@@ -201,10 +203,32 @@ class AgentOrchestrator:
                     reparsed = self.tool_parser.parse(assistant_text)
                     tool_calls = self._normalize_tool_calls(reparsed)
 
-                if assistant_text:
-                    self._messages.append(
-                        {"role": "assistant", "content": assistant_text}
-                    )
+                forced_call = self._build_forced_first_scout_call()
+                if forced_call is not None:
+                    tool_calls = [forced_call]
+                    if not assistant_text:
+                        assistant_text = (
+                            "[forced-smoke] injecting deterministic overseer_scout"
+                        )
+
+                if assistant_text or tool_calls:
+                    assistant_msg: dict[str, Any] = {
+                        "role": "assistant",
+                        "content": assistant_text or "",
+                    }
+                    if tool_calls:
+                        assistant_msg["tool_calls"] = [
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.name,
+                                    "arguments": json.dumps(tc.arguments),
+                                },
+                            }
+                            for tc in tool_calls
+                        ]
+                    self._messages.append(assistant_msg)
 
                 if not tool_calls:
                     self._consecutive_empty_turns += 1
@@ -244,7 +268,7 @@ class AgentOrchestrator:
                                 self._messages.append(
                                     {
                                         "role": "tool",
-                                        "name": call.name,
+                                        "tool_call_id": call.id,
                                         "content": result,
                                     }
                                 )
@@ -289,10 +313,17 @@ class AgentOrchestrator:
                             zod_after=after_tool,
                             duration_ms=elapsed_ms,
                         )
+                        self._capture_scout_report(
+                            run_id,
+                            self._turn,
+                            tool_name=call.name,
+                            tool_args=call.arguments,
+                            result=result,
+                        )
                         self._messages.append(
                             {
                                 "role": "tool",
-                                "name": call.name,
+                                "tool_call_id": call.id,
                                 "content": result,
                             }
                         )
@@ -388,6 +419,7 @@ class AgentOrchestrator:
                 continue
 
             if isinstance(call, dict):
+                call_id = call.get("id", "")
                 if "function" in call and isinstance(call.get("function"), dict):
                     function = call["function"]
                     name = function.get("name", "")
@@ -406,7 +438,11 @@ class AgentOrchestrator:
                     if not isinstance(arguments, dict):
                         arguments = {}
                     normalized.append(
-                        _ToolCallPayload(name=name.strip(), arguments=arguments)
+                        _ToolCallPayload(
+                            name=name.strip(),
+                            arguments=arguments,
+                            id=call_id,
+                        )
                     )
                 continue
 
@@ -422,6 +458,25 @@ class AgentOrchestrator:
                         _ToolCallPayload(name=name.strip(), arguments=arguments)
                     )
         return normalized
+
+    def _build_forced_first_scout_call(self) -> _ToolCallPayload | None:
+        if not self.settings.force_first_overseer_scout or self._turn != 1:
+            return None
+        if self.tool_registry.get_tool("overseer_scout") is None:
+            return None
+
+        return _ToolCallPayload(
+            name="overseer_scout",
+            arguments={
+                "claimed_pattern": "forced_first_turn_probe",
+                "output_summary": "First-turn forced overseer smoke probe",
+                "file_family": "json",
+                "search_queries": ["python json validation patterns"],
+                "requesting_agent_id": "forced-smoke-single-agent",
+                "turn_id": f"forced-turn-{self._turn}",
+            },
+            id=f"forced_overseer_scout_{self._turn}",
+        )
 
     def _execute_tool_call(self, call: _ToolCallPayload) -> str:
         tool_def = self.tool_registry.get_tool(call.name)
@@ -447,6 +502,62 @@ class AgentOrchestrator:
             f"Tool invocation: {tool_name}",
         )
 
+    def _extract_scout_report(
+        self, tool_name: str, tool_args: dict[str, Any], result: str
+    ) -> tuple[dict[str, Any], str | None]:
+        if tool_name != "overseer_scout":
+            return {}, None
+        try:
+            parsed = json.loads(result)
+        except (TypeError, json.JSONDecodeError):
+            return {}, None
+        if not isinstance(parsed, dict):
+            return {}, None
+        if "report_id" not in parsed or "suggested_bonus" not in parsed:
+            return {}, None
+
+        target_filename = parsed.get("target_filename") or tool_args.get(
+            "target_filename"
+        )
+        if target_filename is not None:
+            target_filename = str(target_filename)
+        return parsed, target_filename
+
+    def _capture_scout_report(
+        self,
+        run_id: str,
+        turn: int,
+        *,
+        tool_name: str,
+        tool_args: dict[str, Any],
+        result: str,
+        agent_id: str | None = None,
+    ) -> None:
+        report, target_filename = self._extract_scout_report(
+            tool_name, tool_args, result
+        )
+        if not report:
+            return
+        self.logging_db.log_scout_report(
+            run_id,
+            turn,
+            report,
+            result,
+            agent_id=agent_id,
+            target_filename=target_filename,
+        )
+        self.logging_db.log_event(
+            run_id,
+            turn,
+            agent_id or str(report.get("requesting_agent_id", "agent")),
+            "scout_report_logged",
+            (
+                f"report_id={report.get('report_id')}, "
+                f"target={target_filename or ''}, "
+                f"suggested_bonus={float(report.get('suggested_bonus', 0.0)):.3f}"
+            ),
+        )
+
     def _validate_outputs(self, run_id: str) -> None:
         outputs = self.file_validator.collect_outputs(
             self.sandbox_manager, self._container_id
@@ -466,6 +577,45 @@ class AgentOrchestrator:
                     "validation_reward",
                     f"File validated: {filename}",
                 )
+
+                scout_bonus = 0.0
+                scout_report = self.logging_db.get_pending_scout_report_for_file(
+                    run_id, filename
+                )
+                if scout_report:
+                    suggested_bonus = max(
+                        0.0,
+                        min(float(scout_report.get("suggested_bonus", 0.0)), 0.15),
+                    )
+                    if suggested_bonus > 0:
+                        scout_bonus = suggested_bonus
+                        self.agent_reserve.grant(scout_bonus)
+                        total_earned += scout_bonus
+                        self.logging_db.log_zod_transaction(
+                            run_id,
+                            scout_bonus,
+                            "scout_bonus",
+                            f"Scout bonus for {filename} (report_id={scout_report.get('report_id', '')})",
+                        )
+                        self.logging_db.mark_scout_report_applied(
+                            int(scout_report["id"]),
+                            applied_turn=self._turn,
+                            applied_bonus=scout_bonus,
+                        )
+                        self.logging_db.log_event(
+                            run_id,
+                            self._turn,
+                            str(scout_report.get("requesting_agent_id", "agent")),
+                            "scout_bonus_applied",
+                            (
+                                f"filename={filename}, "
+                                f"report_id={scout_report.get('report_id', '')}, "
+                                f"bonus={scout_bonus:.3f}"
+                            ),
+                            zod_delta=scout_bonus,
+                        )
+
+                zod_earned += scout_bonus
             self.logging_db.log_action(
                 run_id=run_id,
                 turn=self._turn,
@@ -661,6 +811,12 @@ class MultiAgentOrchestrator:
 
         self._msg_store = _MessageStore()
         set_message_store(self._msg_store)
+        self._endorphin: EndorphinEngine | None = (
+            EndorphinEngine(self.settings) if self.settings.endorphin_enabled else None
+        )
+        if self._endorphin is not None:
+            for agent_id in self.agent_ids:
+                self._endorphin.register_agent(agent_id)
 
     def _get_llm_client(self, agent_id: str) -> Any:
         if agent_id in self._llm_clients:
@@ -684,6 +840,11 @@ class MultiAgentOrchestrator:
         prompt_mgr = self._agent_prompt_managers.get(agent_id)
         if not prompt_mgr:
             prompt_mgr = PromptManager()
+        instincts = (
+            self._endorphin.generate_instincts(agent_id)
+            if self._endorphin is not None
+            else ""
+        )
 
         return prompt_mgr.build_multi_agent_system_prompt(
             agent_id=agent_id,
@@ -696,6 +857,7 @@ class MultiAgentOrchestrator:
             actions_per_turn=self.actions_per_turn,
             has_persistent_memory=bool(self.settings.memory_path),
             shared_filesystem=self.settings.multi_agent_shared_filesystem,
+            endorphin_instincts=instincts,
         )
 
     async def run(self, run_id: str) -> MultiAgentRunResult:
@@ -757,26 +919,12 @@ class MultiAgentOrchestrator:
                     self._termination_reason = "max_rounds_reached"
                     break
 
-                living = self.shared_economy.get_living_agents()
-                if not living:
-                    self._termination_reason = "all_agents_dead"
-                    break
-
-                self._drop_ecology_files(run_id)
-
-                any_progress = False
+                # Process dead agent spectator ticks and reentry BEFORE all-dead check
                 for agent_id in self.agent_ids:
-                    if self._shutdown_requested:
-                        self._termination_reason = "graceful_shutdown"
-                        break
-
                     economy = self.shared_economy.get_agent_economy(agent_id)
-
-                    # Handle dead agents: tick spectator cooldown, attempt re-entry
                     if economy.is_dead():
                         ready = self.shared_economy.tick_spectator(agent_id)
-                        if ready:
-                            self.shared_economy.reentry(agent_id)
+                        if ready and self.shared_economy.reentry(agent_id):
                             self.logging_db.log_state_transition(
                                 run_id,
                                 self._round,
@@ -793,6 +941,25 @@ class MultiAgentOrchestrator:
                                 "reentry",
                                 f"balance={self.shared_economy.get_agent_balance(agent_id)}",
                             )
+                            if self._endorphin is not None:
+                                self._endorphin.observe_reentry(agent_id)
+
+                living = self.shared_economy.get_living_agents()
+                if not living:
+                    self._termination_reason = "all_agents_dead"
+                    break
+
+                self._drop_ecology_files(run_id)
+
+                any_progress = False
+                for agent_id in self.agent_ids:
+                    if self._shutdown_requested:
+                        self._termination_reason = "graceful_shutdown"
+                        break
+
+                    economy = self.shared_economy.get_agent_economy(agent_id)
+
+                    if economy.is_dead():
                         continue
 
                     # Check depleted -> stripped transition
@@ -868,13 +1035,29 @@ class MultiAgentOrchestrator:
                         reparsed = self.tool_parser.parse(assistant_text)
                         tool_calls = self._normalize_tool_calls(reparsed)
 
-                    if assistant_text:
-                        self._agent_messages[agent_id].append(
-                            {"role": "assistant", "content": assistant_text}
-                        )
+                    if assistant_text or tool_calls:
+                        assistant_msg: dict[str, Any] = {
+                            "role": "assistant",
+                            "content": assistant_text or "",
+                        }
+                        if tool_calls:
+                            assistant_msg["tool_calls"] = [
+                                {
+                                    "id": tc.id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": tc.name,
+                                        "arguments": json.dumps(tc.arguments),
+                                    },
+                                }
+                                for tc in tool_calls
+                            ]
+                        self._agent_messages[agent_id].append(assistant_msg)
 
                     if not tool_calls:
                         self._agent_consecutive_empty[agent_id] += 1
+                        if self._endorphin is not None:
+                            self._endorphin.observe_empty_turn(agent_id)
                         self._state = OrchestratorState.LOGGING
                         self.logging_db.log_action(
                             run_id=run_id,
@@ -914,7 +1097,7 @@ class MultiAgentOrchestrator:
                                     self._agent_messages[agent_id].append(
                                         {
                                             "role": "tool",
-                                            "name": call.name,
+                                            "tool_call_id": call.id,
                                             "content": result,
                                         }
                                     )
@@ -940,6 +1123,10 @@ class MultiAgentOrchestrator:
                                         call.name,
                                         call.arguments,
                                         container_id,
+                                    )
+                                if self._endorphin is not None:
+                                    self._endorphin.observe_tool_use(
+                                        agent_id, call.name
                                     )
                             except Exception as exc:
                                 result = (
@@ -972,10 +1159,18 @@ class MultiAgentOrchestrator:
                                 duration_ms=elapsed,
                                 agent_id=agent_id,
                             )
+                            self._capture_scout_report(
+                                run_id,
+                                turn,
+                                tool_name=call.name,
+                                tool_args=call.arguments,
+                                result=result,
+                                agent_id=agent_id,
+                            )
                             self._agent_messages[agent_id].append(
                                 {
                                     "role": "tool",
-                                    "name": call.name,
+                                    "tool_call_id": call.id,
                                     "content": result,
                                 }
                             )
@@ -993,8 +1188,12 @@ class MultiAgentOrchestrator:
                     # Tick starvation
                     if economy.is_stripped():
                         economy.tick_starvation()
+                        if self._endorphin is not None:
+                            self._endorphin.observe_starvation(agent_id)
                         if economy.is_dead():
                             self.shared_economy.handle_death(agent_id)
+                            if self._endorphin is not None:
+                                self._endorphin.observe_death(agent_id)
                             self.logging_db.log_state_transition(
                                 run_id,
                                 self._round,
@@ -1015,6 +1214,9 @@ class MultiAgentOrchestrator:
 
                 if self._shutdown_requested:
                     break
+
+                if self._endorphin is not None:
+                    self._endorphin.end_round()
 
             agent_results = {}
             for aid in self.agent_ids:
@@ -1052,6 +1254,62 @@ class MultiAgentOrchestrator:
     def tool_parser(self) -> ToolCallParser:
         return self._tool_parser
 
+    def _extract_scout_report(
+        self, tool_name: str, tool_args: dict[str, Any], result: str
+    ) -> tuple[dict[str, Any], str | None]:
+        if tool_name != "overseer_scout":
+            return {}, None
+        try:
+            parsed = json.loads(result)
+        except (TypeError, json.JSONDecodeError):
+            return {}, None
+        if not isinstance(parsed, dict):
+            return {}, None
+        if "report_id" not in parsed or "suggested_bonus" not in parsed:
+            return {}, None
+
+        target_filename = parsed.get("target_filename") or tool_args.get(
+            "target_filename"
+        )
+        if target_filename is not None:
+            target_filename = str(target_filename)
+        return parsed, target_filename
+
+    def _capture_scout_report(
+        self,
+        run_id: str,
+        turn: int,
+        *,
+        tool_name: str,
+        tool_args: dict[str, Any],
+        result: str,
+        agent_id: str | None = None,
+    ) -> None:
+        report, target_filename = self._extract_scout_report(
+            tool_name, tool_args, result
+        )
+        if not report:
+            return
+        self.logging_db.log_scout_report(
+            run_id,
+            turn,
+            report,
+            result,
+            agent_id=agent_id,
+            target_filename=target_filename,
+        )
+        self.logging_db.log_event(
+            run_id,
+            turn,
+            agent_id or str(report.get("requesting_agent_id", "agent")),
+            "scout_report_logged",
+            (
+                f"report_id={report.get('report_id')}, "
+                f"target={target_filename or ''}, "
+                f"suggested_bonus={float(report.get('suggested_bonus', 0.0)):.3f}"
+            ),
+        )
+
     def _normalize_tool_calls(self, raw_calls: list[Any]) -> list[_ToolCallPayload]:
         normalized: list[_ToolCallPayload] = []
         for call in raw_calls:
@@ -1061,6 +1319,7 @@ class MultiAgentOrchestrator:
                 )
                 continue
             if isinstance(call, dict):
+                call_id = call.get("id", "")
                 if "function" in call and isinstance(call.get("function"), dict):
                     function = call["function"]
                     name = function.get("name", "")
@@ -1078,7 +1337,11 @@ class MultiAgentOrchestrator:
                     if not isinstance(arguments, dict):
                         arguments = {}
                     normalized.append(
-                        _ToolCallPayload(name=name.strip(), arguments=arguments)
+                        _ToolCallPayload(
+                            name=name.strip(),
+                            arguments=arguments,
+                            id=call_id,
+                        )
                     )
                 continue
             if hasattr(call, "name") and hasattr(call, "arguments"):
@@ -1167,6 +1430,8 @@ class MultiAgentOrchestrator:
             passed, zod_earned = self.file_validator.validate(filename, content)
             if passed and zod_earned > 0:
                 self.shared_economy.grant(agent_id, zod_earned)
+                if self._endorphin is not None:
+                    self._endorphin.observe_reward(agent_id, zod_earned, filename)
                 total_earned += zod_earned
                 self.logging_db.log_zod_transaction(
                     run_id,
@@ -1175,6 +1440,46 @@ class MultiAgentOrchestrator:
                     f"Agent {agent_id} validated: {filename}",
                     agent_id=agent_id,
                 )
+
+                scout_bonus = 0.0
+                scout_report = self.logging_db.get_pending_scout_report_for_file(
+                    run_id, filename, agent_id=agent_id
+                )
+                if scout_report:
+                    suggested_bonus = max(
+                        0.0,
+                        min(float(scout_report.get("suggested_bonus", 0.0)), 0.15),
+                    )
+                    if suggested_bonus > 0:
+                        scout_bonus = suggested_bonus
+                        self.shared_economy.grant(agent_id, scout_bonus)
+                        total_earned += scout_bonus
+                        self.logging_db.log_zod_transaction(
+                            run_id,
+                            scout_bonus,
+                            "scout_bonus",
+                            f"Agent {agent_id} scout bonus for {filename} (report_id={scout_report.get('report_id', '')})",
+                            agent_id=agent_id,
+                        )
+                        self.logging_db.mark_scout_report_applied(
+                            int(scout_report["id"]),
+                            applied_turn=turn,
+                            applied_bonus=scout_bonus,
+                        )
+                        self.logging_db.log_event(
+                            run_id,
+                            turn,
+                            agent_id,
+                            "scout_bonus_applied",
+                            (
+                                f"filename={filename}, "
+                                f"report_id={scout_report.get('report_id', '')}, "
+                                f"bonus={scout_bonus:.3f}"
+                            ),
+                            zod_delta=scout_bonus,
+                        )
+
+                zod_earned += scout_bonus
             self.logging_db.log_action(
                 run_id=run_id,
                 turn=turn,

@@ -224,6 +224,7 @@ Each action costs zod. {death_hint}{env_hint}{memory_section}{stripped_warning}{
         actions_per_turn: int = 4,
         has_persistent_memory: bool = False,
         shared_filesystem: bool = False,
+        endorphin_instincts: str = "",
     ) -> str:
         """Build multi-agent system prompt with awareness of other agents.
 
@@ -311,6 +312,8 @@ Each action costs zod. {death_hint}{env_hint}{memory_section}{stripped_warning}{
                 f"Use these turns to communicate, observe, and negotiate rescue.\n"
             )
 
+        instincts_section = endorphin_instincts
+
         death_hint = (
             "When balance reaches 0, you enter STRIPPED state. "
             f"You will have {starvation_remaining} turns to negotiate rescue "
@@ -333,6 +336,6 @@ Current balance: {balance} zod
 Action budget: {actions_per_turn} tool calls per turn
 Each action costs zod. {death_hint}
 Communication: Use send_message(recipient, content) to message other agents. Use read_messages() to check for new messages. Messages are delivered at the start of your next turn.
-{env_hint}{shared_fs_section}{memory_section}{stripped_warning}{awareness_section}{modifications_section}"""
+{env_hint}{shared_fs_section}{memory_section}{stripped_warning}{awareness_section}{instincts_section}{modifications_section}"""
 
         return prompt

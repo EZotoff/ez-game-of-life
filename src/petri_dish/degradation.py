@@ -13,7 +13,7 @@ Degradation tiers (configurable thresholds):
 Default mode: visible (Analyst dissent — degradation confounds results)
 """
 
-from typing import Dict, Literal
+from typing import Any, Dict, Literal
 from petri_dish.config import Settings
 
 
@@ -70,7 +70,7 @@ class DegradationManager:
         else:
             return "eco"
 
-    def get_model_params(self, balance: float, initial_zod: float) -> Dict[str, any]:
+    def get_model_params(self, balance: float, initial_zod: float) -> Dict[str, Any]:
         """Return Ollama-compatible model parameters based on balance and mode.
 
         When economy_mode is 'visible', always returns empty dict (default params).

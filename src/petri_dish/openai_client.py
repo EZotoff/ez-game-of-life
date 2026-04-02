@@ -18,7 +18,7 @@ class OpenAICompatibleClient:
         self,
         *,
         api_key: str | None = None,
-        base_url: str = "https://api.z.ai/api/paas/v4",
+        base_url: str = "https://api.z.ai/api/coding/paas/v4",
         model: str = "glm-5",
         timeout_seconds: float = 120.0,
         max_retries: int = 3,
@@ -45,6 +45,20 @@ class OpenAICompatibleClient:
         tools: list[dict[str, Any]],
     ) -> tuple[str, list[dict[str, Any]]] | None:
         all_messages = [{"role": "system", "content": system_prompt}, *messages]
+
+        # Z.AI requires a user message after the system prompt.
+        # Inject one if the first non-system message is not a user message.
+        _starter = {
+            "role": "user",
+            "content": (
+                "You have just been initialized. "
+                "Observe your environment and decide your first action."
+            ),
+        }
+        if len(all_messages) == 1:
+            all_messages.append(_starter)
+        elif len(all_messages) > 1 and all_messages[1].get("role") != "user":
+            all_messages.insert(1, _starter)
 
         payload: dict[str, Any] = {
             "model": self.model,
@@ -86,6 +100,19 @@ class OpenAICompatibleClient:
                         delay = min(delay * 2, self.max_retry_delay_seconds)
                         continue
                     logger.error("Rate limited after %d retries", attempt + 1)
+                    return None
+
+                if response.status_code == 400:
+                    logger.error(
+                        "Bad Request (400). Response body: %s",
+                        response.text[:2000],
+                    )
+                    logger.error(
+                        "Request payload (model=%s, messages=%d, tools=%d)",
+                        payload.get("model"),
+                        len(payload.get("messages", [])),
+                        len(payload.get("tools", [])),
+                    )
                     return None
 
                 if response.status_code >= 500:
@@ -163,6 +190,7 @@ class OpenAICompatibleClient:
 
             tool_calls.append(
                 {
+                    "id": tc.get("id", ""),
                     "name": name,
                     "arguments": arguments,
                 }
