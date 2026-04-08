@@ -1,6 +1,6 @@
 """Host-side tools that run outside the Docker container.
 
-Tools: check_balance, http_request, overseer_scout.
+Tools: check_balance, http_request, web_search.
 """
 
 import logging
@@ -9,9 +9,9 @@ import urllib.error
 from types import TracebackType
 from typing import Protocol, cast
 
-from petri_dish.tools.overseer_scout import overseer_scout
+from petri_dish.tools.web_search import web_search
 
-__all__ = ["check_balance", "http_request", "overseer_scout"]
+__all__ = ["check_balance", "http_request", "web_search"]
 
 logger = logging.getLogger(__name__)
 

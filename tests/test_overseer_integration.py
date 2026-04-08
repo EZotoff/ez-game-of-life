@@ -1,8 +1,6 @@
-"""Integration tests for overseer scout logging and bonus gating."""
-
 from __future__ import annotations
 
-import json
+import asyncio
 import sys
 from importlib import import_module
 from pathlib import Path
@@ -45,29 +43,22 @@ class _FakeValidator:
         return self._rewards.get(filename, (False, 0.0))
 
 
-def _scout_result(target_filename: str, suggested_bonus: float = 0.1) -> str:
-    return json.dumps(
-        {
-            "report_id": "rep-1",
-            "requesting_agent_id": "agent-0",
-            "file_family": "csv",
-            "target_filename": target_filename,
-            "claimed_pattern": "rows look realistic",
-            "output_summary": "2 valid rows",
-            "confidence": 0.8,
-            "verdict": "supports",
-            "reasoning": "bounded lookup",
-            "suggested_bonus": suggested_bonus,
-        }
-    )
+class _FakeOverseer:
+    def __init__(self, evaluations):
+        self.evaluations = evaluations
+
+    async def maybe_evaluate(self, run_id: str, turn: int, **kwargs):
+        _ = (run_id, turn)
+        return list(self.evaluations)
 
 
 class TestOverseerIntegration:
-    def test_single_agent_applies_scout_bonus_only_with_positive_validator_reward(self):
-        settings = Settings()
+    def test_single_agent_overseer_bonus_with_validation(self):
+        """Overseer bonus + validation reward both apply."""
+        settings = Settings(overseer_enabled=False)
         db = LoggingDB(":memory:")
         db.connect()
-        run_id = "single-scout-positive"
+        run_id = "single-overseer-with-validation"
         db.log_run_start(run_id, {})
 
         validator = _FakeValidator(
@@ -87,32 +78,32 @@ class TestOverseerIntegration:
         )
         orchestrator._container_id = "c-single"
         orchestrator._turn = 1
+        orchestrator._overseer = _FakeOverseer(
+            [
+                {
+                    "agent_id": "agent-0",
+                    "bonus": 0.12,
+                    "reasoning": "bounded novelty",
+                    "tags": ["rows look realistic::csv"],
+                }
+            ]
+        )
 
         start_balance = reserve.get_balance()
-        orchestrator._capture_scout_report(
-            run_id,
-            1,
-            tool_name="overseer_scout",
-            tool_args={"target_filename": "data_001_csv_easy.csv"},
-            result=_scout_result("data_001_csv_easy.csv", suggested_bonus=0.12),
-        )
         orchestrator._validate_outputs(run_id)
+        asyncio.run(orchestrator._apply_overseer_bonuses_single(run_id, 1))
 
         assert reserve.get_balance() == start_balance + 2.12
         txs = db.get_balance_history(run_id)
         assert any(t["type"] == "validation_reward" and t["amount"] == 2.0 for t in txs)
-        assert any(t["type"] == "scout_bonus" and t["amount"] == 0.12 for t in txs)
+        assert any(t["type"] == "overseer_bonus" and t["amount"] == 0.12 for t in txs)
 
-        reports = db.get_scout_reports(run_id)
-        assert len(reports) == 1
-        assert reports[0]["applied"] == 1
-        assert reports[0]["applied_bonus"] == 0.12
-
-    def test_single_agent_no_scout_bonus_when_validator_reward_is_zero(self):
-        settings = Settings()
+    def test_single_agent_overseer_bonus_without_validation(self):
+        """Overseer bonus applies even when validation reward is 0 (gate removed)."""
+        settings = Settings(overseer_enabled=False)
         db = LoggingDB(":memory:")
         db.connect()
-        run_id = "single-scout-zero"
+        run_id = "single-overseer-no-validation"
         db.log_run_start(run_id, {})
 
         validator = _FakeValidator(
@@ -132,27 +123,26 @@ class TestOverseerIntegration:
         )
         orchestrator._container_id = "c-single"
         orchestrator._turn = 1
-
-        orchestrator._capture_scout_report(
-            run_id,
-            1,
-            tool_name="overseer_scout",
-            tool_args={"target_filename": "data_001_csv_easy.csv"},
-            result=_scout_result("data_001_csv_easy.csv", suggested_bonus=0.12),
+        orchestrator._overseer = _FakeOverseer(
+            [{"agent_id": "agent-0", "bonus": 0.12, "reasoning": "x", "tags": []}]
         )
+
+        start_balance = reserve.get_balance()
         orchestrator._validate_outputs(run_id)
+        asyncio.run(orchestrator._apply_overseer_bonuses_single(run_id, 1))
 
+        assert reserve.get_balance() == start_balance + 0.12
         txs = db.get_balance_history(run_id)
-        assert not any(t["type"] == "scout_bonus" for t in txs)
-        reports = db.get_scout_reports(run_id)
-        assert len(reports) == 1
-        assert reports[0]["applied"] == 0
+        assert any(t["type"] == "overseer_bonus" and t["amount"] == 0.12 for t in txs)
 
-    def test_multi_agent_bonus_is_gated_by_validator_reward_and_agent_scope(self):
-        settings = Settings(multi_agent_enabled=True, multi_agent_count=2)
+    def test_multi_agent_overseer_bonus_applies_to_all(self):
+        """Overseer bonus applies to all agents regardless of validation pass (gate removed)."""
+        settings = Settings(
+            multi_agent_enabled=True, multi_agent_count=2, overseer_enabled=False
+        )
         db = LoggingDB(":memory:")
         db.connect()
-        run_id = "multi-scout-gated"
+        run_id = "multi-overseer-ungated"
         db.log_run_start(run_id, {})
 
         validator = _FakeValidator(
@@ -168,35 +158,36 @@ class TestOverseerIntegration:
             file_validator=validator,
             agent_names=["agent-0", "agent-1"],
         )
+        orchestrator._overseer = _FakeOverseer(
+            [
+                {"agent_id": "agent-0", "bonus": 0.1, "reasoning": "novel", "tags": []},
+                {"agent_id": "agent-1", "bonus": 0.1, "reasoning": "novel", "tags": []},
+            ]
+        )
 
         start_a0 = shared.get_agent_balance("agent-0")
         start_a1 = shared.get_agent_balance("agent-1")
-        orchestrator._capture_scout_report(
-            run_id,
-            1,
-            tool_name="overseer_scout",
-            tool_args={"target_filename": "data_001_csv_easy.csv"},
-            result=_scout_result("data_001_csv_easy.csv", suggested_bonus=0.1),
-            agent_id="agent-0",
+
+        asyncio.run(
+            orchestrator._apply_overseer_bonuses_multi(
+                run_id,
+                1,
+            )
         )
 
-        orchestrator._validate_agent_outputs(run_id, "agent-1", 1, "c-agent-1")
-        orchestrator._validate_agent_outputs(run_id, "agent-0", 2, "c-agent-0")
-
-        assert shared.get_agent_balance("agent-1") == start_a1 + 1.5
-        assert shared.get_agent_balance("agent-0") == start_a0 + 1.6
+        assert shared.get_agent_balance("agent-0") == start_a0 + 0.1
+        assert shared.get_agent_balance("agent-1") == start_a1 + 0.1
 
         txs = db.get_balance_history(run_id)
-        a1_scout_bonus = [
-            t for t in txs if t["agent_id"] == "agent-1" and t["type"] == "scout_bonus"
+        a0 = [
+            t
+            for t in txs
+            if t.get("agent_id") == "agent-0" and t["type"] == "overseer_bonus"
         ]
-        a0_scout_bonus = [
-            t for t in txs if t["agent_id"] == "agent-0" and t["type"] == "scout_bonus"
+        a1 = [
+            t
+            for t in txs
+            if t.get("agent_id") == "agent-1" and t["type"] == "overseer_bonus"
         ]
-        assert len(a1_scout_bonus) == 0
-        assert len(a0_scout_bonus) == 1
-        assert a0_scout_bonus[0]["amount"] == 0.1
-
-        reports = db.get_scout_reports(run_id, agent_id="agent-0")
-        assert len(reports) == 1
-        assert reports[0]["applied"] == 1
+        assert len(a0) == 1
+        assert len(a1) == 1

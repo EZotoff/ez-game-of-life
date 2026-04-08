@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Callable
 from petri_dish.config import Settings
 
 if TYPE_CHECKING:
+    from petri_dish.promotion import PromotionEngine
     from petri_dish.sandbox import SandboxManager
 
 logger = logging.getLogger(__name__)
@@ -174,10 +175,15 @@ class FileValidator:
         settings: Configuration. Uses defaults from config.yaml if None.
     """
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        promotion_engine: "PromotionEngine | None" = None,
+    ) -> None:
         if settings is None:
             settings = Settings.from_yaml()
         self._settings = settings
+        self._promotion_engine = promotion_engine
         self._zod_rewards: dict[str, float] = getattr(
             settings, "zod_rewards", {"easy": 0.3, "hard": 2.0}
         )
@@ -211,6 +217,14 @@ class FileValidator:
         weight = self._scoring_weights.get(family, 1.0)
         base_reward = self._zod_rewards.get(difficulty, 0.0)
         zod_earned = base_reward * weight if passed else 0.0
+
+        if passed and zod_earned > 0 and self._promotion_engine is not None:
+            rules = self._promotion_engine.get_promoted_rules_for_family(family)
+            if rules:
+                max_mult = max(
+                    float(rule.get("bonus_multiplier", 1.0)) for rule in rules
+                )
+                zod_earned *= max_mult
 
         logger.info(
             "Validation [%s/%s] %s: %s | zod=%.2f",

@@ -31,6 +31,19 @@ class TraitVector:
         default_factory=lambda: {"csv": 0.0, "json": 0.0, "log": 0.0}
     )
 
+    def to_dict(self) -> dict[str, float | dict[str, float]]:
+        """Serialize scalar traits and file_family_affinity to a plain dict."""
+        return {
+            "curiosity": round(self.curiosity, 3),
+            "thrift": round(self.thrift, 3),
+            "sociability": round(self.sociability, 3),
+            "persistence": round(self.persistence, 3),
+            "shell_affinity": round(self.shell_affinity, 3),
+            "file_family_affinity": {
+                k: round(v, 3) for k, v in self.file_family_affinity.items()
+            },
+        }
+
     @staticmethod
     def _clamp(value: float, low: float = -1.0, high: float = 1.0) -> float:
         return max(low, min(high, value))
@@ -141,7 +154,7 @@ _TRAIT_INSTINCTS: list[tuple[str, float, str, str]] = [
 ]
 
 
-class EndorphinEngine:
+class TraitEngine:
     """Manages per-agent trait vectors and generates instinct prompts.
 
     Observes agent actions and outcomes, updates traits mechanically,
@@ -153,15 +166,15 @@ class EndorphinEngine:
             settings = Settings.from_yaml()
         self._traits: dict[str, TraitVector] = {}
         self._settings: Settings = settings
-        self._ema_alpha: float = float(getattr(settings, "endorphin_ema_alpha", 0.3))
+        self._ema_alpha: float = float(getattr(settings, "traits_ema_alpha", 0.3))
         self._decay_factor: float = float(
-            getattr(settings, "endorphin_decay_factor", 0.95)
+            getattr(settings, "traits_decay_factor", 0.95)
         )
         self._rebirth_factor: float = float(
-            getattr(settings, "endorphin_rebirth_factor", 0.85)
+            getattr(settings, "traits_rebirth_factor", 0.85)
         )
         self._instinct_threshold: float = float(
-            getattr(settings, "endorphin_instinct_threshold", 0.3)
+            getattr(settings, "traits_instinct_threshold", 0.3)
         )
         self._recent_tools: dict[str, list[str]] = {}
         self._round_rewards: dict[str, float] = {}

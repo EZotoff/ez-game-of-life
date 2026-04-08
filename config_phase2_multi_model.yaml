@@ -1,16 +1,16 @@
-initial_zod: 200
+initial_zod: 60
 decay_rate_per_turn: 1.0
-max_turns: 60
-starvation_turns: 7
+max_turns: 12
+starvation_turns: 5
 memory_path: .sisyphus/memory
 
-model_name: hf.co/bartowski/Qwen_Qwen3-30B-A3B-Instruct-2507-GGUF:IQ3_XS
+model_name: glm-4.7
 ollama_base_url: http://localhost:11434
 default_temperature: 0.7
-llm_backend: ollama
+llm_backend: openai_compatible
 openai_api_base_url: https://api.z.ai/api/coding/paas/v4
 openai_api_key_env_var: ZAI_API_KEY
-openai_model_name: glm-5
+openai_model_name: glm-4.7
 
 docker_image: python:3.12-slim
 docker_mem_limit: 256m
@@ -18,13 +18,13 @@ docker_cpu_quota: 50000
 docker_storage_limit: 512m
 
 economy_mode: visible
-file_drop_lambda: 0.3
-file_drop_interval_turns: 3
+file_drop_lambda: 0.1
+file_drop_interval_turns: 2
 max_turns_per_tool: 1
 turn_timeout_seconds: 60
-max_consecutive_empty_turns: 10
-context_window_tokens: 8192
-context_summary_interval_turns: 40
+max_consecutive_empty_turns: 5
+context_window_tokens: 4096
+context_summary_interval_turns: 20
 
 tool_costs:
   file_read: 0.0
@@ -52,21 +52,22 @@ validator_scoring_weights:
   json: 1.0
   log: 1.0
 zod_rewards:
-  easy: 15.0
-  hard: 30.0
+  easy: 10.0
+  hard: 20.0
 
 null_model_type: random
 
 web_search_cost: 0.15
 web_search_calls_per_turn: 1
-web_search_daily_budget: 50
-web_search_provider: duckduckgo_instant_answer
-web_search_base_url: https://api.duckduckgo.com/
+web_search_daily_budget: 15
+tavily_api_key: ""
+web_search_provider: tavily
+web_search_base_url: https://api.tavily.com/search
 web_search_user_agent: PetriDish-Scout/1.0 (+read-only)
 web_search_timeout_seconds: 10
-web_search_max_queries_per_call: 3
-web_search_max_results_per_query: 5
-web_search_chars_per_result: 2000
+web_search_max_queries_per_call: 2
+web_search_max_results_per_query: 3
+web_search_chars_per_result: 1500
 web_search_allow_redirects: false
 web_search_blocked_domains:
   - localhost
@@ -74,19 +75,25 @@ web_search_blocked_domains:
   - 0.0.0.0
   - local
 
-overseer_enabled: false
-overseer_evaluation_interval: 5
+overseer_enabled: true
+overseer_evaluation_interval: 3
 
-multi_agent_enabled: false
-multi_agent_count: 2
-multi_agent_models: []
-multi_agent_names: []
+multi_agent_enabled: true
+multi_agent_count: 3
+multi_agent_names:
+  - alice
+  - bob
+  - carol
+multi_agent_models:
+  - glm-4.7
+  - glm-4.7
+  - glm-4.7-flash
 multi_agent_shared_filesystem: true
 multi_agent_actions_per_turn: 4
 multi_agent_death_forfeit_pct: 0.6
 multi_agent_decay_pct: 0.3
 multi_agent_salvage_pct: 0.3
-multi_agent_reentry_fee: 18
+multi_agent_reentry_fee: 10
 multi_agent_spectator_rounds: 2
 multi_agent_debt_garnish_pct: 0.5
 
@@ -95,3 +102,16 @@ traits_ema_alpha: 0.3
 traits_decay_factor: 0.95
 traits_rebirth_factor: 0.85
 traits_instinct_threshold: 0.3
+
+request_task_enabled: true
+request_task_max_cost: 15.0
+request_task_complexity_rates:
+  SIMPLE: 0.5
+  MODERATE: 2.0
+  COMPLEX: 5.0
+  VERY_COMPLEX: 10.0
+
+promotion_enabled: true
+promotion_threshold: 3
+promotion_bonus_multiplier: 1.5
+max_promoted_rules: 10

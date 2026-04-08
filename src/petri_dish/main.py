@@ -245,8 +245,6 @@ async def _run_multi_agent_async(
     resource_ecology = ResourceEcology(settings=settings)
 
     llm_clients: dict[str, _ChatClient] = {}
-    for name in agent_names:
-        llm_clients[name] = _create_llm_client(settings, null_model)
 
     orchestrator = MultiAgentOrchestrator(
         settings=settings,

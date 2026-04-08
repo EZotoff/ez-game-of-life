@@ -215,6 +215,76 @@ class DashboardServer:
                 )
                 return [dict(row) for row in cursor.fetchall()]
 
+        @self.app.get("/api/runs/{run_id}/traits")
+        async def get_traits(run_id: str, agent_id: str | None = None):
+            with LoggingDB(self.db_path).read_only_connection() as conn:
+                cursor = conn.cursor()
+                if agent_id:
+                    cursor.execute(
+                        """
+                        SELECT id, run_id, round_num, agent_id, curiosity, thrift, sociability,
+                               persistence, shell_affinity, file_family_affinity_json, timestamp
+                        FROM trait_snapshots
+                        WHERE run_id = ? AND agent_id = ?
+                        ORDER BY round_num ASC, id ASC
+                        """,
+                        (run_id, agent_id),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        SELECT id, run_id, round_num, agent_id, curiosity, thrift, sociability,
+                               persistence, shell_affinity, file_family_affinity_json, timestamp
+                        FROM trait_snapshots
+                        WHERE run_id = ?
+                        ORDER BY round_num ASC, id ASC
+                        """,
+                        (run_id,),
+                    )
+
+                snapshots = []
+                for row in cursor.fetchall():
+                    item = dict(row)
+                    raw_affinity = item.get("file_family_affinity_json")
+                    if raw_affinity:
+                        try:
+                            item["file_family_affinity"] = json.loads(raw_affinity)
+                        except Exception:
+                            item["file_family_affinity"] = {}
+                    else:
+                        item["file_family_affinity"] = {}
+                    snapshots.append(item)
+                return snapshots
+
+        @self.app.get("/api/runs/{run_id}/llm-calls")
+        async def get_llm_calls(run_id: str, agent_id: str | None = None):
+            with LoggingDB(self.db_path).read_only_connection() as conn:
+                cursor = conn.cursor()
+                if agent_id:
+                    cursor.execute(
+                        """
+                        SELECT id, run_id, turn, agent_id, model_name, system_prompt_snippet,
+                               user_prompt_snippet, response_snippet, duration_ms, timestamp
+                        FROM llm_calls
+                        WHERE run_id = ? AND agent_id = ?
+                        ORDER BY turn ASC, id ASC
+                        """,
+                        (run_id, agent_id),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        SELECT id, run_id, turn, agent_id, model_name, system_prompt_snippet,
+                               user_prompt_snippet, response_snippet, duration_ms, timestamp
+                        FROM llm_calls
+                        WHERE run_id = ?
+                        ORDER BY turn ASC, id ASC
+                        """,
+                        (run_id,),
+                    )
+
+                return [dict(row) for row in cursor.fetchall()]
+
         @self.app.get("/api/events")
         async def sse_events(request: Request, run_id: str | None = None):
             async def event_generator() -> AsyncGenerator[str, None]:

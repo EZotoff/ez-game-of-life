@@ -73,8 +73,8 @@ multi_agent_reentry_fee: 18
 multi_agent_spectator_rounds: 2
 multi_agent_debt_garnish_pct: 0.5
 
-endorphin_enabled: true
-endorphin_ema_alpha: 0.3
-endorphin_decay_factor: 0.95
-endorphin_rebirth_factor: 0.85
-endorphin_instinct_threshold: 0.3
+traits_enabled: true
+traits_ema_alpha: 0.3
+traits_decay_factor: 0.95
+traits_rebirth_factor: 0.85
+traits_instinct_threshold: 0.3

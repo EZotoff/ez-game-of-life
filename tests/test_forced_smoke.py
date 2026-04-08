@@ -7,8 +7,6 @@ from typing import cast
 from petri_dish.config import Settings
 from petri_dish.null_model import JsonValue
 from petri_dish.null_model import NullModel
-from petri_dish.orchestrator import AgentOrchestrator
-from petri_dish.tool_parser import ToolCallParser
 from petri_dish.tools import get_all_tools
 
 
@@ -21,9 +19,8 @@ def _tool_schema(name: str, required: list[str] | None = None) -> dict[str, obje
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "claimed_pattern": {"type": "string"},
-                    "output_summary": {"type": "string"},
-                    "file_family": {"type": "string"},
+                    "query": {"type": "string"},
+                    "max_results": {"type": "integer"},
                     "key": {"type": "string"},
                     "value": {"type": "string"},
                 },
@@ -33,58 +30,46 @@ def _tool_schema(name: str, required: list[str] | None = None) -> dict[str, obje
     }
 
 
-def test_null_model_overseer_smoke_forces_scout_first() -> None:
-    model = NullModel(seed=7, null_model_type="overseer_smoke")
+def test_null_model_random_mode_generates_tool_calls() -> None:
+    model = NullModel(seed=7, null_model_type="random")
     tools = [
-        _tool_schema(
-            "overseer_scout",
-            required=["claimed_pattern", "output_summary", "file_family"],
-        ),
+        _tool_schema("web_search", required=["query"]),
         _tool_schema("self_modify", required=["key", "value"]),
         _tool_schema("file_read", required=[]),
     ]
 
     typed_tools = cast(list[dict[str, JsonValue]], tools)
     _, calls = __import__("asyncio").run(model.chat("", [], typed_tools))
-
     assert len(calls) == 1
-    function = calls[0]["function"]
-    assert function["name"] == "overseer_scout"
-    arguments = function["arguments"]
-    assert arguments["claimed_pattern"]
-    assert arguments["output_summary"]
-    assert arguments["file_family"]
+    assert calls[0]["function"]["name"] in {"web_search", "self_modify", "file_read"}
 
 
-def test_null_model_overseer_smoke_excludes_self_modify_after_first_turn() -> None:
-    model = NullModel(seed=11, null_model_type="overseer_smoke")
+def test_null_model_random_mode_can_choose_multiple_tools() -> None:
+    model = NullModel(seed=11, null_model_type="random")
     tools = [
-        _tool_schema(
-            "overseer_scout",
-            required=["claimed_pattern", "output_summary", "file_family"],
-        ),
+        _tool_schema("web_search", required=["query"]),
         _tool_schema("self_modify", required=["key", "value"]),
         _tool_schema("file_read", required=[]),
     ]
 
-    seen: list[str] = []
-    for _ in range(12):
+    seen: set[str] = set()
+    for _ in range(16):
         typed_tools = cast(list[dict[str, JsonValue]], tools)
         _, calls = __import__("asyncio").run(model.chat("", [], typed_tools))
-        seen.append(str(calls[0]["function"]["name"]))
+        seen.add(str(calls[0]["function"]["name"]))
 
-    assert seen[0] == "overseer_scout"
-    assert "self_modify" not in seen
+    assert len(seen) >= 2
 
 
 def test_forced_smoke_config_loads_expected_mode() -> None:
     settings = Settings.from_yaml("config_overseer_forced_smoke.yaml")
 
-    assert settings.null_model_type == "overseer_smoke"
-    assert settings.max_turns == 5
-    assert settings.overseer_scout_daily_budget == 3
-    assert settings.overseer_search_max_queries_per_call == 1
-    assert settings.force_first_overseer_scout is True
+    assert settings.null_model_type == "random"
+    assert settings.max_turns == 8
+    assert settings.web_search_daily_budget == 5
+    assert settings.web_search_max_queries_per_call == 1
+    assert settings.web_search_provider == "stackexchange_advanced"
+    assert settings.overseer_enabled is False
 
 
 def test_forced_smoke_config_file_exists_and_is_json_safe() -> None:
@@ -94,41 +79,28 @@ def test_forced_smoke_config_file_exists_and_is_json_safe() -> None:
     settings = Settings.from_yaml(str(path))
     payload = {
         "null_model_type": settings.null_model_type,
-        "budget": settings.overseer_scout_daily_budget,
+        "budget": settings.web_search_daily_budget,
         "max_turns": settings.max_turns,
     }
     assert json.loads(json.dumps(payload)) == {
-        "null_model_type": "overseer_smoke",
-        "budget": 3,
-        "max_turns": 5,
+        "null_model_type": "random",
+        "budget": 5,
+        "max_turns": 8,
     }
 
 
-def test_agent_orchestrator_builds_forced_first_scout_call() -> None:
+def test_forced_smoke_tavily_config_loads_expected_mode() -> None:
+    settings = Settings.from_yaml("config_overseer_forced_smoke_tavily.yaml")
+
+    assert settings.null_model_type == "random"
+    assert settings.max_turns == 8
+    assert settings.web_search_daily_budget == 5
+    assert settings.web_search_provider == "tavily"
+    assert settings.web_search_base_url == "https://api.tavily.com/search"
+    assert settings.tavily_api_key == ""
+
+
+def test_tool_registry_contains_web_search_for_forced_smoke_config() -> None:
     settings = Settings.from_yaml("config_overseer_forced_smoke.yaml")
-    orchestrator = AgentOrchestrator(
-        settings=settings,
-        tool_parser=ToolCallParser(),
-        tool_registry=get_all_tools(settings=settings),
-    )
-    orchestrator._turn = 1
-
-    call = orchestrator._build_forced_first_scout_call()
-
-    assert call is not None
-    assert call.name == "overseer_scout"
-    assert call.arguments["claimed_pattern"] == "forced_first_turn_probe"
-    assert call.arguments["requesting_agent_id"] == "forced-smoke-single-agent"
-    assert call.arguments["turn_id"] == "forced-turn-1"
-
-
-def test_agent_orchestrator_does_not_force_after_first_turn() -> None:
-    settings = Settings.from_yaml("config_overseer_forced_smoke.yaml")
-    orchestrator = AgentOrchestrator(
-        settings=settings,
-        tool_parser=ToolCallParser(),
-        tool_registry=get_all_tools(settings=settings),
-    )
-    orchestrator._turn = 2
-
-    assert orchestrator._build_forced_first_scout_call() is None
+    registry = get_all_tools(settings=settings)
+    assert registry.get_tool("web_search") is not None

@@ -26,29 +26,22 @@ class NullModel:
 
         Args:
             seed: Random seed for reproducibility. If None, uses system time.
-            null_model_type: Type of null model behavior ("random", "constant", "none", "overseer_smoke").
+            null_model_type: Type of null model behavior ("random", "constant", "none").
         """
         self._rng: random.Random = random.Random(seed)
         self._seed: int | None = seed
         self._null_model_type: str = null_model_type
-        self._forced_overseer_emitted: bool = False
 
     def _prepare_tool_schemas(
         self, tools: list[dict[str, JsonValue]]
     ) -> list[dict[str, Any]]:
-        """Normalize tool schemas and apply smoke-mode filtering."""
+        """Normalize tool schemas."""
         tool_schemas: list[dict[str, Any]] = []
         for tool in tools:
             if isinstance(tool, dict) and tool.get("type") == "function":
                 func = tool.get("function")
                 if isinstance(func, dict):
                     tool_schemas.append(func)
-
-        if self._null_model_type == "overseer_smoke":
-            return [
-                schema for schema in tool_schemas if schema.get("name") != "self_modify"
-            ]
-
         return tool_schemas
 
     async def chat(
@@ -81,32 +74,7 @@ class NullModel:
         if not tool_schemas:
             return "", []
 
-        # Handle overseer_smoke mode - force overseer_scout on first call
-        if (
-            self._null_model_type == "overseer_smoke"
-            and not self._forced_overseer_emitted
-        ):
-            # Look for overseer_scout tool
-            overseer_schema = None
-            for schema in tool_schemas:
-                if schema.get("name") == "overseer_scout":
-                    overseer_schema = schema
-                    break
-
-            if overseer_schema:
-                self._forced_overseer_emitted = True
-                selected_schema = overseer_schema
-                # Consume a random choice to maintain RNG sequence consistency
-                # (even though we're forcing overseer_scout, we want the RNG state
-                # to advance as if we had made a random selection)
-                if tool_schemas:
-                    _ = self._rng.choice(tool_schemas)
-            else:
-                # Fall back to random selection if overseer_scout not available
-                selected_schema: dict[str, Any] = self._rng.choice(tool_schemas)
-        else:
-            # Randomly select a tool for other modes or after forced emission
-            selected_schema: dict[str, Any] = self._rng.choice(tool_schemas)
+        selected_schema: dict[str, Any] = self._rng.choice(tool_schemas)
 
         tool_name: Any = selected_schema.get("name", "")
         if not isinstance(tool_name, str) or not tool_name:

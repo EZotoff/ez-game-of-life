@@ -6,7 +6,13 @@ with all 12 agent tools registered (8 base + 2 communication + 2 new).
 
 from petri_dish.config import Settings
 from petri_dish.tools.registry import ToolDefinition, ToolParameter, ToolRegistry
-from petri_dish.tools import container_tools, host_tools, agent_tools, comm_tools
+from petri_dish.tools import (
+    container_tools,
+    host_tools,
+    agent_tools,
+    comm_tools,
+    task_broker_tools,
+)
 
 
 def _build_tool_definitions() -> list[ToolDefinition]:
@@ -140,51 +146,26 @@ def _build_tool_definitions() -> list[ToolDefinition]:
             host_side=True,
         ),
         ToolDefinition(
-            name="overseer_scout",
+            name="web_search",
             description=(
-                "Request bounded read-only external validation via DuckDuckGo Instant "
-                "Answer API. Returns a structured scout report with confidence and "
-                "verdict."
+                "Search the web using configured provider and return raw "
+                "read-only results (title/url/snippet)."
             ),
             parameters=[
                 ToolParameter(
-                    name="claimed_pattern",
+                    name="query",
                     type="string",
-                    description="Pattern or rule you claim the output follows",
+                    description="Search query to execute",
                 ),
                 ToolParameter(
-                    name="output_summary",
-                    type="string",
-                    description="Brief summary of produced output",
-                ),
-                ToolParameter(
-                    name="file_family",
-                    type="string",
-                    description="Family of file under validation",
-                    enum=["csv", "json", "log"],
-                ),
-                ToolParameter(
-                    name="search_queries",
-                    type="array",
-                    description="Optional list of search queries (max configured)",
+                    name="max_results",
+                    type="integer",
+                    description="Maximum results to return (default 3)",
                     required=False,
-                    default=[],
-                ),
-                ToolParameter(
-                    name="requesting_agent_id",
-                    type="string",
-                    description="Agent id requesting the scout report",
-                    required=False,
-                    default="unknown",
-                ),
-                ToolParameter(
-                    name="turn_id",
-                    type="string",
-                    description="Optional turn identifier for per-turn cap enforcement",
-                    required=False,
+                    default=3,
                 ),
             ],
-            handler=host_tools.overseer_scout,
+            handler=host_tools.web_search,
             host_side=True,
             free_when_stripped=False,
         ),
@@ -240,6 +221,24 @@ def _build_tool_definitions() -> list[ToolDefinition]:
             handler=comm_tools.read_messages,
             host_side=True,
             free_when_stripped=True,
+        ),
+        ToolDefinition(
+            name="request_task",
+            description=(
+                "Delegate a task to a specialist sub-agent. The broker estimates complexity, "
+                "quotes a zod cost, and if you can afford it, runs the task. Returns the result. "
+                "Use for analysis, code generation, research, or any reasoning-heavy work "
+                "beyond simple tool calls."
+            ),
+            parameters=[
+                ToolParameter(
+                    name="task_description",
+                    type="string",
+                    description="Clear, specific description of the task to delegate.",
+                ),
+            ],
+            handler=task_broker_tools.request_task_stub,
+            host_side=True,
         ),
     ]
 

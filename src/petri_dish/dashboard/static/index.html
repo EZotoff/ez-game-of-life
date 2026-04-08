@@ -123,6 +123,21 @@
             </details>
         </div>
 
+        <div class="bg-slate-900 border border-slate-800 rounded-lg p-4 shrink-0">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-500">Trait Radar</h2>
+                <div class="flex items-center gap-2">
+                    <label for="trait-round-selector" class="text-xs text-slate-400">Round</label>
+                    <select id="trait-round-selector" class="bg-slate-800 border border-slate-700 text-xs rounded-md px-2 py-1 focus:outline-none focus:border-indigo-500 text-slate-200 min-w-[120px]">
+                        <option value="latest">Latest</option>
+                    </select>
+                </div>
+            </div>
+            <div class="h-64">
+                <canvas id="traitRadarChart"></canvas>
+            </div>
+        </div>
+
         <div class="flex-1 bg-slate-900 border border-slate-800 rounded-lg flex flex-col overflow-hidden">
             <div class="p-4 border-b border-slate-800 flex justify-between items-center shrink-0">
                 <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-500">Action History</h2>
@@ -176,6 +191,8 @@
         let currentRunId = null;
         let eventSource = null;
         let chart = null;
+        let traitRadarChart = null;
+        let traitSnapshots = [];
         let chartData = { labels: [], datasets: {}, balances: [] }; 
         let isHoveringLog = false;
         
@@ -186,6 +203,7 @@
         const autoScrollCheckbox = document.getElementById('auto-scroll');
         const statusIndicator = document.getElementById('status-indicator');
         const emptyLog = document.getElementById('empty-log');
+        const traitRoundSelector = document.getElementById('trait-round-selector');
         
         const statDropped = document.getElementById('stat-dropped');
         const statProcessed = document.getElementById('stat-processed');
@@ -198,6 +216,115 @@
         let messagesEmpty = document.getElementById('messages-empty');
         const eventsList = document.getElementById('events-list');
         let eventsEmpty = document.getElementById('events-empty');
+
+        const TRAIT_AXES = ['curiosity', 'thrift', 'sociability', 'persistence', 'shell_affinity'];
+
+        function initTraitRadarChart() {
+            const ctx = document.getElementById('traitRadarChart').getContext('2d');
+            traitRadarChart = new Chart(ctx, {
+                type: 'radar',
+                data: {
+                    labels: TRAIT_AXES,
+                    datasets: []
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: { duration: 0 },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            align: 'end',
+                            labels: {
+                                boxWidth: 12,
+                                usePointStyle: true,
+                                color: '#94a3b8'
+                            }
+                        }
+                    },
+                    scales: {
+                        r: {
+                            min: 0,
+                            max: 1,
+                            ticks: {
+                                stepSize: 0.2,
+                                backdropColor: 'transparent',
+                                color: '#64748b'
+                            },
+                            grid: { color: '#1e293b' },
+                            angleLines: { color: '#1e293b' },
+                            pointLabels: { color: '#94a3b8' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateTraitRoundSelector() {
+            const rounds = Array.from(new Set(traitSnapshots.map(s => s.round_num))).sort((a, b) => a - b);
+            const currentValue = traitRoundSelector.value || 'latest';
+            traitRoundSelector.innerHTML = '<option value="latest">Latest</option>';
+            rounds.forEach(round => {
+                const option = document.createElement('option');
+                option.value = String(round);
+                option.textContent = `Round ${round}`;
+                traitRoundSelector.appendChild(option);
+            });
+
+            if (currentValue !== 'latest' && rounds.includes(Number(currentValue))) {
+                traitRoundSelector.value = currentValue;
+            } else {
+                traitRoundSelector.value = 'latest';
+            }
+        }
+
+        function updateTraitRadar() {
+            if (!traitRadarChart) return;
+
+            const selectedRound = traitRoundSelector.value;
+            const snapshotsByAgent = new Map();
+
+            traitSnapshots.forEach(snapshot => {
+                const agentId = snapshot.agent_id || 'System';
+                const existing = snapshotsByAgent.get(agentId);
+
+                if (selectedRound === 'latest') {
+                    if (!existing || snapshot.round_num >= existing.round_num) {
+                        snapshotsByAgent.set(agentId, snapshot);
+                    }
+                } else {
+                    const roundLimit = Number(selectedRound);
+                    if (snapshot.round_num <= roundLimit) {
+                        if (!existing || snapshot.round_num >= existing.round_num) {
+                            snapshotsByAgent.set(agentId, snapshot);
+                        }
+                    }
+                }
+            });
+
+            traitRadarChart.data.datasets = Array.from(snapshotsByAgent.entries()).map(([agentId, snapshot]) => {
+                const color = getAgentColor(snapshot.agent_id) || '#818cf8';
+                return {
+                    label: agentId,
+                    data: TRAIT_AXES.map(axis => Number(snapshot[axis] || 0)),
+                    borderColor: color,
+                    backgroundColor: `${color}33`,
+                    borderWidth: 2,
+                    pointRadius: 2,
+                    pointHoverRadius: 4,
+                    fill: true
+                };
+            });
+
+            traitRadarChart.update();
+        }
+
+        function setTraitSnapshots(snapshots) {
+            traitSnapshots = Array.isArray(snapshots) ? snapshots : [];
+            updateTraitRoundSelector();
+            updateTraitRadar();
+        }
 
         function initChart() {
             const ctx = document.getElementById('balanceChart').getContext('2d');
@@ -482,7 +609,7 @@
                     return null;
                 }
                 
-                runs.forEach((run, i) => {
+                runs.forEach((run) => {
                     const option = document.createElement('option');
                     option.value = run.run_id;
                     const date = new Date(run.start_time).toLocaleString();
@@ -501,6 +628,7 @@
             chartData.labels = [];
             chartData.datasets = {};
             chartData.balances = [];
+            traitSnapshots = [];
             logBody.innerHTML = '';
             messagesList.innerHTML = '<div id="messages-empty" class="text-slate-500 text-sm italic">No messages yet.</div>';
             eventsList.innerHTML = '<div id="events-empty" class="text-slate-500 text-sm italic">No events yet.</div>';
@@ -509,14 +637,17 @@
             eventsEmpty = document.getElementById('events-empty');
             
             chart.update();
+            updateTraitRoundSelector();
+            updateTraitRadar();
 
-            const [actionsRes, balanceRes, summaryRes, filesRes, messagesRes, eventsRes] = await Promise.all([
+            const [actionsRes, balanceRes, summaryRes, filesRes, messagesRes, eventsRes, traitsRes] = await Promise.all([
                 fetch(`/api/runs/${runId}/actions`),
                 fetch(`/api/runs/${runId}/balance`),
                 fetch(`/api/runs/${runId}/summary`),
                 fetch(`/api/runs/${runId}/files`),
                 fetch(`/api/runs/${runId}/messages`),
-                fetch(`/api/runs/${runId}/events`)
+                fetch(`/api/runs/${runId}/events`),
+                fetch(`/api/runs/${runId}/traits`)
             ]);
 
             const actions = await actionsRes.json();
@@ -525,6 +656,7 @@
             const files = await filesRes.json();
             const messages = await messagesRes.json();
             const events = await eventsRes.json();
+            const traits = await traitsRes.json();
             
             updateHeader(summary);
             updateFiles(files);
@@ -532,6 +664,7 @@
             updateChart(balances);
             appendMessages(messages);
             appendEvents(events.reverse());
+            setTraitSnapshots(traits);
         }
 
         function setupSSE(runId) {
@@ -582,6 +715,9 @@
 
         async function init() {
             initChart();
+            initTraitRadarChart();
+
+            traitRoundSelector.addEventListener('change', updateTraitRadar);
             
             logContainer.addEventListener('mouseenter', () => isHoveringLog = true);
             logContainer.addEventListener('mouseleave', () => isHoveringLog = false);

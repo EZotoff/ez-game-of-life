@@ -30,14 +30,16 @@ sys.path.insert(0, str(Path('src').resolve()))
 from petri_dish.config import Settings
 
 data = {}
-for name in ('config_overseer_smoke.yaml', 'config_overseer_pilot.yaml', 'config_overseer_ga.yaml'):
+for name in ('config_overseer_smoke.yaml', 'config_overseer_pilot.yaml', 'config_overseer_ga.yaml', 'config_overseer_forced_smoke_tavily.yaml'):
     s = Settings.from_yaml(name)
     data[name] = {
         'max_turns': s.max_turns,
-        'budget': s.overseer_scout_daily_budget,
-        'queries': s.overseer_search_max_queries_per_call,
-        'cost': s.tool_costs.get('overseer_scout'),
-    }
+            'budget': s.web_search_daily_budget,
+            'queries': s.web_search_max_queries_per_call,
+            'cost': s.tool_costs.get('web_search'),
+            'provider': s.web_search_provider,
+            'overseer_enabled': s.overseer_enabled,
+        }
 
 print(json.dumps(data))
 """
@@ -49,18 +51,32 @@ print(json.dumps(data))
         "budget": 6,
         "queries": 2,
         "cost": 0.15,
+        "provider": "duckduckgo_instant_answer",
+        "overseer_enabled": False,
     }
     assert payload["config_overseer_pilot.yaml"] == {
         "max_turns": 30,
         "budget": 20,
         "queries": 3,
         "cost": 0.15,
+        "provider": "duckduckgo_instant_answer",
+        "overseer_enabled": False,
     }
     assert payload["config_overseer_ga.yaml"] == {
         "max_turns": 60,
         "budget": 50,
         "queries": 3,
         "cost": 0.15,
+        "provider": "duckduckgo_instant_answer",
+        "overseer_enabled": False,
+    }
+    assert payload["config_overseer_forced_smoke_tavily.yaml"] == {
+        "max_turns": 8,
+        "budget": 5,
+        "queries": 1,
+        "cost": 0.15,
+        "provider": "tavily",
+        "overseer_enabled": False,
     }
 
 
@@ -68,6 +84,7 @@ def test_run_experiment_cli_accepts_overseer_smoke_config() -> None:
     code = """
 import importlib.util
 import json
+import types
 import sys
 from pathlib import Path
 
@@ -76,7 +93,6 @@ sys.path.insert(0, str((root / 'src').resolve()))
 
 spec = importlib.util.spec_from_file_location('run_experiment_script', root / 'scripts' / 'run_experiment.py')
 module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
 
 observed = {}
 
@@ -93,10 +109,13 @@ def fake_run_experiment_with_id(*, config_path, null_model, run_id):
     from petri_dish.config import Settings
     loaded = Settings.from_yaml(config_path)
     observed['llm_backend'] = loaded.llm_backend
-    observed['budget'] = loaded.overseer_scout_daily_budget
+    observed['budget'] = loaded.web_search_daily_budget
     return FakeResult()
 
-module.run_experiment_with_id = fake_run_experiment_with_id
+main_mod = types.ModuleType('petri_dish.main')
+main_mod.run_experiment_with_id = fake_run_experiment_with_id
+sys.modules['petri_dish.main'] = main_mod
+spec.loader.exec_module(module)
 sys.argv = ['run_experiment.py', '--config', 'config_overseer_smoke.yaml', '--run-id', 'scout-smoke-001', '--api']
 exit_code = module.main()
 

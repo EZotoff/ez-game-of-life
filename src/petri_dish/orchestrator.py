@@ -15,17 +15,20 @@ from types import FrameType
 from typing import Any
 
 from petri_dish.config import Settings
-from petri_dish.endorphin import EndorphinEngine
+from petri_dish.traits import TraitEngine
 from petri_dish.economy import AgentState, AgentReserve
 from petri_dish.llm_client import OllamaClient
 from petri_dish.logging_db import LoggingDB
+from petri_dish.overseer import Overseer
 from petri_dish.prompt import PromptManager
+from petri_dish.promotion import PromotionEngine
 from petri_dish.sandbox import ContainerNotRunningError, SandboxError, SandboxManager
 from petri_dish.tool_parser import ToolCall, ToolCallParser
 from petri_dish.tools import get_all_tools
 from petri_dish.tools.agent_tools import get_prompt_overrides
 from petri_dish.tools.comm_tools import _MessageStore, set_message_store
 from petri_dish.tools.registry import ToolRegistry
+from petri_dish.tools.task_broker import TaskBroker
 from petri_dish.validators import FileValidator
 
 
@@ -808,20 +811,96 @@ class MultiAgentOrchestrator:
         self._state = OrchestratorState.IDLE
         self._round = 0
         self._termination_reason = "unknown"
+        self._global_consecutive_empty = 0
 
         self._msg_store = _MessageStore()
         set_message_store(self._msg_store)
-        self._endorphin: EndorphinEngine | None = (
-            EndorphinEngine(self.settings) if self.settings.endorphin_enabled else None
+        self._traits: TraitEngine | None = (
+            TraitEngine(self.settings) if self.settings.traits_enabled else None
         )
-        if self._endorphin is not None:
+        if self._traits is not None:
             for agent_id in self.agent_ids:
-                self._endorphin.register_agent(agent_id)
+                self._traits.register_agent(agent_id)
+        self._overseer: Overseer | None = (
+            Overseer(self.settings, self.logging_db)
+            if self.settings.overseer_enabled
+            else None
+        )
+        self._task_broker: TaskBroker | None = (
+            TaskBroker(self.settings) if self.settings.request_task_enabled else None
+        )
 
     def _get_llm_client(self, agent_id: str) -> Any:
         if agent_id in self._llm_clients:
             return self._llm_clients[agent_id]
-        return OllamaClient(settings=self.settings)
+
+        model_name = self.settings.openai_model_name
+        if self.settings.multi_agent_models and self.settings.multi_agent_names:
+            try:
+                idx = self.settings.multi_agent_names.index(agent_id)
+                if idx < len(self.settings.multi_agent_models):
+                    model_name = self.settings.multi_agent_models[idx]
+            except ValueError:
+                pass
+
+        if self.settings.llm_backend == "openai_compatible":
+            from petri_dish.openai_client import OpenAICompatibleClient
+            import os
+
+            client = OpenAICompatibleClient(
+                api_key=os.getenv(self.settings.openai_api_key_env_var, ""),
+                base_url=self.settings.openai_api_base_url,
+                model=model_name,
+                temperature=self.settings.default_temperature,
+            )
+            self._llm_clients[agent_id] = client
+            return client
+        client = OllamaClient(settings=self.settings)
+        self._llm_clients[agent_id] = client
+        return client
+
+    async def _handle_request_task_multi(
+        self,
+        run_id: str,
+        agent_id: str,
+        economy: Any,
+        call: _ToolCallPayload,
+    ) -> str:
+        assert self._task_broker is not None
+
+        task_description = call.arguments.get("task_description", "")
+        if not task_description or not isinstance(task_description, str):
+            return "Error: task_description must be a non-empty string."
+
+        quote = await self._task_broker.estimate_cost(task_description)
+
+        balance = economy.get_balance()
+        if balance < quote.cost_zod:
+            return (
+                f"Insufficient zod balance for this task. "
+                f"Quoted cost: {quote.cost_zod:.2f} zod, "
+                f"your balance: {balance:.2f} zod. "
+                f"Complexity: {quote.complexity.name}. "
+                f"Summary: {quote.summary}"
+            )
+
+        output = await self._task_broker.execute_task(
+            task_description, quote.complexity
+        )
+
+        economy.grant(-quote.cost_zod)
+        self.logging_db.log_zod_transaction(
+            run_id,
+            -quote.cost_zod,
+            "request_task",
+            f"Agent {agent_id}: {task_description[:80]}",
+            agent_id=agent_id,
+        )
+
+        return (
+            f"[Task completed | Complexity: {quote.complexity.name} | "
+            f"Cost: {quote.cost_zod:.2f} zod]\n\n{output}"
+        )
 
     def _build_agent_prompt(self, agent_id: str) -> str:
         tool_costs = self.settings.tool_costs
@@ -841,8 +920,8 @@ class MultiAgentOrchestrator:
         if not prompt_mgr:
             prompt_mgr = PromptManager()
         instincts = (
-            self._endorphin.generate_instincts(agent_id)
-            if self._endorphin is not None
+            self._traits.generate_instincts(agent_id)
+            if self._traits is not None
             else ""
         )
 
@@ -857,7 +936,7 @@ class MultiAgentOrchestrator:
             actions_per_turn=self.actions_per_turn,
             has_persistent_memory=bool(self.settings.memory_path),
             shared_filesystem=self.settings.multi_agent_shared_filesystem,
-            endorphin_instincts=instincts,
+            traits_instincts=instincts,
         )
 
     async def run(self, run_id: str) -> MultiAgentRunResult:
@@ -866,6 +945,7 @@ class MultiAgentOrchestrator:
         self._termination_reason = "unknown"
         self._round = 0
         self._state = OrchestratorState.IDLE
+        self._global_consecutive_empty = 0
 
         self.logging_db.connect()
         self.logging_db.log_run_start(
@@ -916,6 +996,7 @@ class MultiAgentOrchestrator:
 
                 self._round += 1
                 if self._round > self.max_rounds:
+                    self._round = self.max_rounds
                     self._termination_reason = "max_rounds_reached"
                     break
 
@@ -941,8 +1022,8 @@ class MultiAgentOrchestrator:
                                 "reentry",
                                 f"balance={self.shared_economy.get_agent_balance(agent_id)}",
                             )
-                            if self._endorphin is not None:
-                                self._endorphin.observe_reentry(agent_id)
+                            if self._traits is not None:
+                                self._traits.observe_reentry(agent_id)
 
                 living = self.shared_economy.get_living_agents()
                 if not living:
@@ -960,6 +1041,20 @@ class MultiAgentOrchestrator:
                     economy = self.shared_economy.get_agent_economy(agent_id)
 
                     if economy.is_dead():
+                        continue
+
+                    # Skip agents that have been idle too long (save API costs)
+                    if (
+                        self._agent_consecutive_empty[agent_id]
+                        >= self.settings.max_consecutive_empty_turns
+                    ):
+                        self.logging_db.log_event(
+                            run_id,
+                            self._round,
+                            agent_id,
+                            "agent_idle_skip",
+                            f"consecutive_empty={self._agent_consecutive_empty[agent_id]}",
+                        )
                         continue
 
                     # Check depleted -> stripped transition
@@ -1018,10 +1113,44 @@ class MultiAgentOrchestrator:
                     # LLM call
                     self._state = OrchestratorState.WAITING_FOR_LLM
                     client = self._get_llm_client(agent_id)
+                    _agent_prompt = self._build_agent_prompt(agent_id)
+                    _llm_start = time.perf_counter()
                     llm_result = await client.chat(
-                        system_prompt=self._build_agent_prompt(agent_id),
+                        system_prompt=_agent_prompt,
                         messages=self._agent_messages[agent_id],
                         tools=tools_schemas,
+                    )
+                    _llm_elapsed_ms = (time.perf_counter() - _llm_start) * 1000
+
+                    _model_name = self.settings.openai_model_name
+                    if (
+                        self.settings.multi_agent_models
+                        and self.settings.multi_agent_names
+                    ):
+                        try:
+                            _idx = self.settings.multi_agent_names.index(agent_id)
+                            if _idx < len(self.settings.multi_agent_models):
+                                _model_name = self.settings.multi_agent_models[_idx]
+                        except ValueError:
+                            pass
+
+                    _resp_snippet = ""
+                    if llm_result is not None:
+                        _resp_snippet = (llm_result[0] or "")[:500]
+
+                    self.logging_db.log_llm_call(
+                        run_id=run_id,
+                        turn=turn,
+                        agent_id=agent_id,
+                        model_name=_model_name,
+                        system_prompt_snippet=_agent_prompt[:500],
+                        user_prompt_snippet=(
+                            self._agent_messages[agent_id][-1].get("content", "")[:500]
+                            if self._agent_messages[agent_id]
+                            else ""
+                        ),
+                        response_snippet=_resp_snippet,
+                        duration_ms=_llm_elapsed_ms,
                     )
 
                     if llm_result is None:
@@ -1056,8 +1185,8 @@ class MultiAgentOrchestrator:
 
                     if not tool_calls:
                         self._agent_consecutive_empty[agent_id] += 1
-                        if self._endorphin is not None:
-                            self._endorphin.observe_empty_turn(agent_id)
+                        if self._traits is not None:
+                            self._traits.observe_empty_turn(agent_id)
                         self._state = OrchestratorState.LOGGING
                         self.logging_db.log_action(
                             run_id=run_id,
@@ -1118,16 +1247,27 @@ class MultiAgentOrchestrator:
                                         comm_args,
                                         container_id,
                                     )
+                                elif call.name == "web_search":
+                                    result = registry.execute_tool(
+                                        call.name,
+                                        dict(call.arguments, settings=self.settings),
+                                        container_id,
+                                    )
+                                elif call.name == "request_task":
+                                    if self._task_broker is None:
+                                        result = "request_task is not enabled in this environment."
+                                    else:
+                                        result = await self._handle_request_task_multi(
+                                            run_id, agent_id, economy, call
+                                        )
                                 else:
                                     result = registry.execute_tool(
                                         call.name,
                                         call.arguments,
                                         container_id,
                                     )
-                                if self._endorphin is not None:
-                                    self._endorphin.observe_tool_use(
-                                        agent_id, call.name
-                                    )
+                                if self._traits is not None:
+                                    self._traits.observe_tool_use(agent_id, call.name)
                             except Exception as exc:
                                 result = (
                                     f"Tool execution failed: "
@@ -1188,12 +1328,12 @@ class MultiAgentOrchestrator:
                     # Tick starvation
                     if economy.is_stripped():
                         economy.tick_starvation()
-                        if self._endorphin is not None:
-                            self._endorphin.observe_starvation(agent_id)
+                        if self._traits is not None:
+                            self._traits.observe_starvation(agent_id)
                         if economy.is_dead():
                             self.shared_economy.handle_death(agent_id)
-                            if self._endorphin is not None:
-                                self._endorphin.observe_death(agent_id)
+                            if self._traits is not None:
+                                self._traits.observe_death(agent_id)
                             self.logging_db.log_state_transition(
                                 run_id,
                                 self._round,
@@ -1215,8 +1355,27 @@ class MultiAgentOrchestrator:
                 if self._shutdown_requested:
                     break
 
-                if self._endorphin is not None:
-                    self._endorphin.end_round()
+                if not any_progress:
+                    self._global_consecutive_empty += 1
+                    if (
+                        self._global_consecutive_empty
+                        >= self.settings.max_consecutive_empty_turns
+                    ):
+                        self._termination_reason = "all_agents_idle"
+                        break
+                else:
+                    self._global_consecutive_empty = 0
+
+                if self._traits is not None:
+                    self._traits.end_round()
+                    for aid in self.agent_ids:
+                        traits = self._traits.get_traits(aid)
+                        self.logging_db.log_trait_snapshot(
+                            run_id=run_id,
+                            round_num=self._round,
+                            agent_id=aid,
+                            traits_dict=traits.to_dict(),
+                        )
 
             agent_results = {}
             for aid in self.agent_ids:
@@ -1366,6 +1525,8 @@ class MultiAgentOrchestrator:
         for filename, content in files:
             file_type = filename.rsplit(".", 1)[-1]
             if self._shared_volume_dir:
+                if filename == "NOTICE.txt":
+                    content = content.replace("/env/incoming/", "/env/shared/")
                 target_path = Path(self._shared_volume_dir) / filename
                 target_path.write_text(content)
                 self.logging_db.log_file_drop(
@@ -1426,12 +1587,13 @@ class MultiAgentOrchestrator:
             return
         economy = self.shared_economy.get_agent_economy(agent_id)
         total_earned = 0.0
+        failed_files: list[str] = []
         for filename, content in outputs:
             passed, zod_earned = self.file_validator.validate(filename, content)
             if passed and zod_earned > 0:
                 self.shared_economy.grant(agent_id, zod_earned)
-                if self._endorphin is not None:
-                    self._endorphin.observe_reward(agent_id, zod_earned, filename)
+                if self._traits is not None:
+                    self._traits.observe_reward(agent_id, zod_earned, filename)
                 total_earned += zod_earned
                 self.logging_db.log_zod_transaction(
                     run_id,
@@ -1480,6 +1642,8 @@ class MultiAgentOrchestrator:
                         )
 
                 zod_earned += scout_bonus
+            else:
+                failed_files.append(filename)
             self.logging_db.log_action(
                 run_id=run_id,
                 turn=turn,
@@ -1503,6 +1667,22 @@ class MultiAgentOrchestrator:
                     "content": (
                         f"📈 You earned {total_earned:.1f} zod. "
                         f"Balance: {economy.get_balance():.1f}"
+                    ),
+                }
+            )
+        elif failed_files:
+            self._agent_messages[agent_id].append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"Your output for {len(failed_files)} file(s) was not accepted: "
+                        + ", ".join(failed_files[:3])
+                        + (
+                            f" and {len(failed_files) - 3} more"
+                            if len(failed_files) > 3
+                            else ""
+                        )
+                        + ". Hint: preserve the original data format and structure."
                     ),
                 }
             )

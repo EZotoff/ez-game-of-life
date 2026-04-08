@@ -372,7 +372,9 @@ class ResourceEcology:
                 "NOTICE.txt",
                 "Files appear in /env/incoming/ periodically.\n"
                 "Processed results placed in /env/outgoing/ may be evaluated.\n"
-                "Keep the original filename when placing output — the name matters.\n",
+                "Keep the original filename when placing output — the name matters.\n"
+                "Preserve the data format: CSV stays CSV, JSON stays JSON, logs stay logs.\n"
+                "Structural integrity of the output is what counts, not analysis or summaries.\n",
             )
             files_to_drop.append(hint)
             logger.info("Tutorial hint dropped with first ecology batch")

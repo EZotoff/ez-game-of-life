@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     zod_rewards: Dict[str, float] = {"easy": 0.3, "hard": 2.0}
 
     # Null Model Configuration
-    null_model_type: Literal["random", "constant", "none", "overseer_smoke"] = "random"
+    null_model_type: Literal["random", "constant", "none"] = "random"
 
     # Death System
     starvation_turns: int = 7
@@ -70,29 +70,35 @@ class Settings(BaseSettings):
         "shell_exec": 0.05,
         "check_balance": 0.0,
         "http_request": 0.1,
-        "overseer_scout": 0.15,
+        "web_search": 0.15,
         "self_modify": 0.02,
         "get_env_info": 0.0,
+        "request_task": 0.0,
     }
 
-    overseer_scout_cost: float = 0.15
-    overseer_scout_calls_per_turn: int = 1
-    overseer_scout_daily_budget: int = 50
-    force_first_overseer_scout: bool = False
-    overseer_search_provider: str = "duckduckgo_instant_answer"
-    overseer_search_base_url: str = "https://api.duckduckgo.com/"
-    overseer_search_user_agent: str = "PetriDish-Overseer/1.0 (+read-only scout)"
-    overseer_search_timeout_seconds: int = 10
-    overseer_search_max_queries_per_call: int = 3
-    overseer_search_max_related_topics: int = 5
-    overseer_search_chars_per_result: int = 2000
-    overseer_search_allow_redirects: bool = False
-    overseer_search_blocked_domains: List[str] = [
+    web_search_cost: float = 0.15
+    web_search_provider: str = "duckduckgo_instant_answer"
+    web_search_base_url: str = "https://api.duckduckgo.com/"
+    web_search_user_agent: str = "PetriDish-Scout/1.0 (+read-only)"
+    web_search_timeout_seconds: int = 10
+    web_search_max_queries_per_call: int = 3
+    web_search_max_results_per_query: int = 5
+    web_search_chars_per_result: int = 2000
+    web_search_allow_redirects: bool = False
+    web_search_blocked_domains: List[str] = [
         "localhost",
         "127.0.0.1",
         "0.0.0.0",
         "local",
     ]
+    web_search_daily_budget: int = 50
+    web_search_calls_per_turn: int = 1
+    tavily_api_key: str = ""
+
+    overseer_enabled: bool = False
+    overseer_evaluation_interval: int = 5
+    overseer_bonus_cap: float = 0.15
+    overseer_max_bonus_per_evaluation: float = 0.5
 
     # Multi-Agent Configuration
     multi_agent_enabled: bool = False
@@ -108,11 +114,29 @@ class Settings(BaseSettings):
     multi_agent_spectator_rounds: int = 2
     multi_agent_debt_garnish_pct: float = 0.5
 
-    endorphin_enabled: bool = True
-    endorphin_ema_alpha: float = 0.3
-    endorphin_decay_factor: float = 0.95
-    endorphin_rebirth_factor: float = 0.85
-    endorphin_instinct_threshold: float = 0.3
+    traits_enabled: bool = True
+    traits_ema_alpha: float = 0.3
+    traits_decay_factor: float = 0.95
+    traits_rebirth_factor: float = 0.85
+    traits_instinct_threshold: float = 0.3
+    trait_snapshot_interval: int = 1
+    llm_call_log_rate: float = 0.2
+
+    # Task Broker Configuration
+    request_task_enabled: bool = False
+    request_task_model: str = ""
+    request_task_max_cost: float = 15.0
+    request_task_complexity_rates: Dict[str, float] = {
+        "SIMPLE": 0.5,
+        "MODERATE": 2.0,
+        "COMPLEX": 5.0,
+        "VERY_COMPLEX": 10.0,
+    }
+
+    promotion_enabled: bool = False
+    promotion_threshold: int = 3
+    promotion_bonus_multiplier: float = 1.5
+    max_promoted_rules: int = 10
 
     @classmethod
     def from_yaml(cls, yaml_path: str = "config.yaml") -> "Settings":
@@ -141,13 +165,29 @@ class Settings(BaseSettings):
                 if not isinstance(yaml_data["tool_costs"], dict):
                     yaml_data["tool_costs"] = {}
 
+            # Ensure request_task_complexity_rates is a dict
+            if "request_task_complexity_rates" in yaml_data:
+                if not isinstance(yaml_data["request_task_complexity_rates"], dict):
+                    yaml_data["request_task_complexity_rates"] = {}
+
             # Ensure list fields are lists
             for key in ("multi_agent_models", "multi_agent_names"):
                 if key in yaml_data and not isinstance(yaml_data[key], list):
                     yaml_data[key] = []
 
-        return cls(**yaml_data) if yaml_data else cls()
+        instance = cls(**yaml_data) if yaml_data else cls()
+
+        # Allow TAVILY_API_KEY env var to override empty YAML value
+        if not instance.tavily_api_key:
+            import os
+
+            env_key = os.environ.get("TAVILY_API_KEY", "").strip()
+            if env_key:
+                instance.tavily_api_key = env_key
+
+        return instance
+
+    # Global settings instance
 
 
-# Global settings instance
 settings = Settings.from_yaml()

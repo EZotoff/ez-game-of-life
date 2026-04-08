@@ -33,7 +33,7 @@ tool_costs:
   shell_exec: 1.0
   python_exec: 1.0
   http_request: 1.0
-  overseer_scout: 0.15
+  web_search: 0.15
   check_balance: 0.0
   self_modify: 0.2
   get_env_info: 0.0
@@ -57,22 +57,25 @@ zod_rewards:
 
 null_model_type: random
 
-overseer_scout_cost: 0.15
-overseer_scout_calls_per_turn: 1
-overseer_scout_daily_budget: 6
-overseer_search_provider: duckduckgo_instant_answer
-overseer_search_base_url: https://api.duckduckgo.com/
-overseer_search_user_agent: PetriDish-Overseer/1.0 (+read-only scout)
-overseer_search_timeout_seconds: 10
-overseer_search_max_queries_per_call: 2
-overseer_search_max_related_topics: 3
-overseer_search_chars_per_result: 1500
-overseer_search_allow_redirects: false
-overseer_search_blocked_domains:
+web_search_cost: 0.15
+web_search_calls_per_turn: 1
+web_search_daily_budget: 6
+web_search_provider: duckduckgo_instant_answer
+web_search_base_url: https://api.duckduckgo.com/
+web_search_user_agent: PetriDish-Scout/1.0 (+read-only)
+web_search_timeout_seconds: 10
+web_search_max_queries_per_call: 2
+web_search_max_results_per_query: 3
+web_search_chars_per_result: 1500
+web_search_allow_redirects: false
+web_search_blocked_domains:
   - localhost
   - 127.0.0.1
   - 0.0.0.0
   - local
+
+overseer_enabled: false
+overseer_evaluation_interval: 5
 
 multi_agent_enabled: false
 multi_agent_count: 2
@@ -87,8 +90,8 @@ multi_agent_reentry_fee: 18
 multi_agent_spectator_rounds: 2
 multi_agent_debt_garnish_pct: 0.5
 
-endorphin_enabled: true
-endorphin_ema_alpha: 0.3
-endorphin_decay_factor: 0.95
-endorphin_rebirth_factor: 0.85
-endorphin_instinct_threshold: 0.3
+traits_enabled: true
+traits_ema_alpha: 0.3
+traits_decay_factor: 0.95
+traits_rebirth_factor: 0.85
+traits_instinct_threshold: 0.3

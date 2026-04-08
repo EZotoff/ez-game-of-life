@@ -181,123 +181,6 @@ async def test_null_model_no_tools() -> None:
     print()
 
 
-async def test_null_model_overseer_smoke() -> None:
-    """Test overseer_smoke mode forces overseer_scout tool call."""
-    print("=== Test 6: Overseer Smoke Mode ===")
-
-    # Create a mock tool list that includes overseer_scout
-    mock_tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": "overseer_scout",
-                "description": "Scout for information",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "claimed_pattern": {"type": "string"},
-                        "output_summary": {"type": "string"},
-                        "file_family": {"type": "string"},
-                        "search_queries": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                        },
-                        "requesting_agent_id": {"type": "string"},
-                        "turn_id": {"type": "integer"},
-                        "settings": {"type": "object"},
-                    },
-                    "required": [
-                        "claimed_pattern",
-                        "output_summary",
-                        "file_family",
-                        "search_queries",
-                    ],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "file_read",
-                "description": "Read a file",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"path": {"type": "string"}},
-                    "required": ["path"],
-                },
-            },
-        },
-    ]
-
-    # Test with overseer_smoke mode
-    model = NullModel(seed=42, null_model_type="overseer_smoke")
-
-    # First call should force overseer_scout
-    response_text, tool_calls = await model.chat(
-        "Test",
-        [{"role": "user", "content": "Test"}],
-        mock_tools,
-    )
-
-    print(f"First call - Response text: '{response_text}'")
-    print(f"First call - Number of tool calls: {len(tool_calls)}")
-
-    if tool_calls:
-        tool_call = tool_calls[0]
-        tool_name = tool_call["function"]["name"]
-        print(f"First call - Tool name: {tool_name}")
-        assert tool_name == "overseer_scout", (
-            f"Expected overseer_scout, got {tool_name}"
-        )
-
-    # Second call should fall back to random selection
-    response_text2, tool_calls2 = await model.chat(
-        "Test",
-        [{"role": "user", "content": "Test"}],
-        mock_tools,
-    )
-
-    print(f"Second call - Response text: '{response_text2}'")
-    print(f"Second call - Number of tool calls: {len(tool_calls2)}")
-
-    if tool_calls2:
-        tool_call2 = tool_calls2[0]
-        tool_name2 = tool_call2["function"]["name"]
-        print(f"Second call - Tool name: {tool_name2}")
-        # Could be overseer_scout or file_read (random selection)
-        # Just verify we got a valid tool call
-
-    # Test fallback when overseer_scout not available
-    mock_tools_no_overseer = [
-        {
-            "type": "function",
-            "function": {
-                "name": "file_read",
-                "description": "Read a file",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"path": {"type": "string"}},
-                    "required": ["path"],
-                },
-            },
-        }
-    ]
-
-    model2 = NullModel(seed=42, null_model_type="overseer_smoke")
-    response_text3, tool_calls3 = await model2.chat(
-        "Test",
-        [{"role": "user", "content": "Test"}],
-        mock_tools_no_overseer,
-    )
-
-    print(f"No overseer available - Response text: '{response_text3}'")
-    print(f"No overseer available - Number of tool calls: {len(tool_calls3)}")
-    assert len(tool_calls3) == 1  # Should still generate a tool call
-
-    print("Overseer smoke mode test passed!")
-    print()
-
-
 async def main() -> None:
     """Run all tests."""
     print("Testing Null Model (Random-Action Baseline)\n")
@@ -307,8 +190,6 @@ async def main() -> None:
     await test_null_model_different_seeds()
     await test_null_model_argument_validity()
     await test_null_model_no_tools()
-    await test_null_model_overseer_smoke()
-
     print("=== All Tests Complete ===")
 
 
