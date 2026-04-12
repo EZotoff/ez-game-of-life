@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 import signal
@@ -852,10 +853,18 @@ class MultiAgentOrchestrator:
                 base_url=self.settings.openai_api_base_url,
                 model=model_name,
                 temperature=self.settings.default_temperature,
+                rate_limit_max_retries=self.settings.rate_limit_max_retries,
+                rate_limit_initial_delay=self.settings.rate_limit_initial_delay,
+                rate_limit_max_delay=self.settings.rate_limit_max_delay,
             )
             self._llm_clients[agent_id] = client
             return client
-        client = OllamaClient(settings=self.settings)
+        client = OllamaClient(
+            settings=self.settings,
+            rate_limit_max_retries=self.settings.rate_limit_max_retries,
+            rate_limit_initial_delay=self.settings.rate_limit_initial_delay,
+            rate_limit_max_delay=self.settings.rate_limit_max_delay,
+        )
         self._llm_clients[agent_id] = client
         return client
 
@@ -1111,6 +1120,8 @@ class MultiAgentOrchestrator:
                         tools_schemas = registry.get_all_schemas()
 
                     # LLM call
+                    if self.settings.llm_inter_call_delay > 0:
+                        await asyncio.sleep(self.settings.llm_inter_call_delay)
                     self._state = OrchestratorState.WAITING_FOR_LLM
                     client = self._get_llm_client(agent_id)
                     _agent_prompt = self._build_agent_prompt(agent_id)
@@ -1376,6 +1387,29 @@ class MultiAgentOrchestrator:
                             agent_id=aid,
                             traits_dict=traits.to_dict(),
                         )
+
+                if self._overseer is not None:
+                    trait_vectors = {}
+                    if self._traits is not None:
+                        for aid in self.agent_ids:
+                            trait_vectors[aid] = self._traits.get_traits(aid).to_dict()
+                    evaluations = await self._overseer.maybe_evaluate(
+                        run_id=run_id,
+                        turn=self._round,
+                        trait_vectors=trait_vectors,
+                    )
+                    for ev in evaluations:
+                        agent_id = ev.get("agent_id", "")
+                        bonus = float(ev.get("bonus", 0.0))
+                        if agent_id and bonus > 0:
+                            self.shared_economy.grant(agent_id, bonus)
+                            self.logging_db.log_zod_transaction(
+                                run_id,
+                                bonus,
+                                "overseer_bonus",
+                                ev.get("reasoning", "")[:120],
+                                agent_id=agent_id,
+                            )
 
             agent_results = {}
             for aid in self.agent_ids:

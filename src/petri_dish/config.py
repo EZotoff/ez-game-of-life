@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     openai_api_key_env_var: str = "ZAI_API_KEY"
     openai_model_name: str = "glm-5"
 
+    # Rate-Limit Resilience (429 handling)
+    # 0 = retry indefinitely (the world waits), N = give up after N retries
+    rate_limit_max_retries: int = 0
+    rate_limit_initial_delay: float = 2.0
+    rate_limit_max_delay: float = 600.0
+    llm_inter_call_delay: float = 2.0
+
     # Docker Container Parameters
     docker_image: str = "python:3.12-slim"
     docker_mem_limit: str = "512m"

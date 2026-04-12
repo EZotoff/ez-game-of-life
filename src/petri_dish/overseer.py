@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any
 
@@ -9,14 +10,28 @@ from petri_dish.llm_client import OllamaClient
 from petri_dish.logging_db import LoggingDB
 from petri_dish.openai_client import OpenAICompatibleClient
 
+logger = logging.getLogger(__name__)
+
 
 class Overseer:
     def __init__(self, settings: Settings, logging_db: LoggingDB):
         self._settings = settings
         self._db = logging_db
-        self._archive: list[dict[str, Any]] = []
         self._evaluation_interval: int = max(
             1, int(settings.overseer_evaluation_interval)
+        )
+        self._system_prompt: str = (
+            "You are the Overseer. You watch agents in a sandbox. "
+            "When you see behavior that surprises you — something you haven't seen "
+            "these agents do before — reward it with zod. You decide what counts as "
+            "novel. Trust your judgment.\n\n"
+            "You CAN rewrite your own system prompt. If you think you'd evaluate "
+            "better with different criteria, change it. Include "
+            '"new_system_prompt": "..." in your response alongside any bonuses.\n\n'
+            "Return JSON:\n"
+            '{"bonuses": [{"agent_id": str, "bonus": float, "reasoning": str}], '
+            '"new_system_prompt": null or string}\n'
+            'If nothing is novel, return {"bonuses": [], "new_system_prompt": null}'
         )
 
     async def maybe_evaluate(
@@ -30,11 +45,20 @@ class Overseer:
         if turn <= 0 or (turn % self._evaluation_interval) != 0:
             return []
 
-        prompt = self._build_evaluation_prompt(
-            run_id, turn, trait_vectors=trait_vectors or {}
-        )
+        prompt = self._build_prompt(run_id, turn, trait_vectors or {})
+        logger.warning("Overseer turn %d: prompt %d chars", turn, len(prompt))
         response = await self._call_llm(prompt)
-        evaluations = self._parse_response(response)
+        logger.warning("Overseer response: %s", response[:500])
+
+        result = self._parse_response(response)
+
+        if result.get("new_system_prompt"):
+            self._system_prompt = result["new_system_prompt"]
+            logger.warning(
+                "Overseer self-modified prompt (%d chars)", len(self._system_prompt)
+            )
+
+        evaluations = result.get("bonuses", [])
         if not evaluations:
             return []
 
@@ -57,12 +81,10 @@ class Overseer:
                 continue
             agent_id = str(item.get("agent_id", "agent"))
             reasoning = str(item.get("reasoning", ""))
-            tags = [str(x) for x in item.get("tags", []) if isinstance(x, str)]
             normalized = {
                 "agent_id": agent_id,
                 "bonus": applied,
                 "reasoning": reasoning,
-                "tags": tags,
             }
             capped.append(normalized)
             total += applied
@@ -72,83 +94,51 @@ class Overseer:
                 agent_id=agent_id,
                 bonus=applied,
                 reasoning=reasoning,
-                tags=tags,
+                tags=[],
                 evaluation_json=json.dumps(normalized),
             )
 
-        self._update_archive(capped)
         return capped
 
-    def _build_evaluation_prompt(
+    def _build_prompt(
         self,
         run_id: str,
         turn: int,
-        trait_vectors: dict[str, dict[str, float | dict[str, float]]] | None = None,
+        trait_vectors: dict[str, dict[str, float | dict[str, float]]],
     ) -> str:
-        all_actions = self._db.get_actions(run_id)
-        recent = [
-            a
-            for a in all_actions
-            if int(a.get("turn", 0)) > max(0, turn - self._evaluation_interval)
-        ]
-        agent_ids = sorted(
-            {str(a.get("agent_id")) for a in recent if a.get("agent_id")}
-        )
-        if not agent_ids:
-            agent_ids = ["agent"]
+        interval = self._evaluation_interval
+        since_turn = max(1, turn - interval)
 
-        history_by_agent: dict[str, list[dict[str, Any]]] = {}
-        for agent_id in agent_ids:
-            history_by_agent[agent_id] = self._db.get_agent_history(
-                run_id, agent_id, last_n_turns=10
+        actions_summary: list[str] = []
+        for aid in sorted(trait_vectors.keys()):
+            actions_summary.append(
+                f"  {aid}: "
+                + ", ".join(
+                    f"{k}={v:.2f}"
+                    for k, v in trait_vectors[aid].items()
+                    if isinstance(v, (int, float)) and k != "file_family_affinity"
+                )
             )
+        traits_block = "\n".join(actions_summary)
 
-        recent_without_agent = [
-            {
-                "turn": int(a.get("turn", 0)),
-                "tool_name": str(a.get("tool_name", "")),
-                "tool_args": a.get("tool_args"),
-                "result": str(a.get("result", ""))[:500],
-            }
-            for a in recent
-            if not a.get("agent_id")
-        ]
-
-        payload = {
-            "run_id": run_id,
-            "turn": turn,
-            "evaluation_interval": self._evaluation_interval,
-            "agent_ids": agent_ids,
-            "recent_actions": recent_without_agent,
-            "agent_histories": history_by_agent,
-            "archive_summary": self._archive[-30:],
-            "trait_vectors": trait_vectors or {},
-        }
+        recent_lines: list[str] = []
+        for aid in sorted(trait_vectors.keys()):
+            history = self._db.get_agent_history(run_id, aid, last_n_turns=interval)
+            for a in history[-6:]:
+                tool = a.get("tool_name", "?")
+                args = a.get("tool_args")
+                args_str = ""
+                if isinstance(args, dict):
+                    args_str = json.dumps(args, ensure_ascii=False)[:80]
+                recent_lines.append(
+                    f"  t{a.get('turn', '?')} {aid}: {tool}({args_str})"
+                )
+        actions_block = "\n".join(recent_lines[-20:])
 
         return (
-            "You are Overseer. You observe agents in a shared sandbox and reward "
-            "genuinely novel behavior. Be conservative — most turns deserve no bonus.\n\n"
-            "THREE INVARIANTS — ask these every evaluation window:\n"
-            "1. NOVEL: Is this behavior genuinely new relative to the archive and "
-            "trait vectors, or just a minor variation of something already seen?\n"
-            "2. SHAPING: Does it alter the interaction structure — how agents "
-            "coordinate, compete, or use the environment — or is it cosmetic?\n"
-            "3. PERSISTENT: Does the behavior recur, propagate, or create "
-            "downstream consequences, or is it a one-turn gimmick?\n\n"
-            "If the answer to any invariant is clearly NO, award no bonus.\n\n"
-            "OPTIONAL LENSES (not scorecards — just ways to notice novelty):\n"
-            "- Coordination patterns (alliances, signaling, resource sharing)\n"
-            "- Adaptation to economic pressure (zod conservation, risk strategies)\n"
-            "- Environmental exploitation (tool combos, file strategies)\n\n"
-            "REJECT: self-labeled cleverness, verbose justifications, theatrical "
-            "roleplay shifts with no behavioral consequence, random chaos, and "
-            "one-turn stunts that leave no trace.\n\n"
-            "Describe novelty in your own words. Do not name dimensions.\n\n"
-            "Return strict JSON array only:\n"
-            '[{"agent_id": str, "bonus": float, "reasoning": str, "tags": [str]}]\n'
-            "If no agent deserves a bonus this window, return [].\n"
-            "Bonuses are capped in code — you cannot exceed limits.\n\n"
-            f"Context:\n{json.dumps(payload, ensure_ascii=False)}"
+            f"Turn {turn}. Traits:\n{traits_block}\n\n"
+            f"Recent actions (since turn {since_turn}):\n{actions_block}\n\n"
+            "Who did something novel? Respond in JSON."
         )
 
     async def _call_llm(self, prompt: str) -> str:
@@ -159,31 +149,33 @@ class Overseer:
                 base_url=self._settings.openai_api_base_url,
                 model=self._settings.openai_model_name,
                 temperature=self._settings.default_temperature,
+                rate_limit_max_retries=self._settings.rate_limit_max_retries,
+                rate_limit_initial_delay=self._settings.rate_limit_initial_delay,
+                rate_limit_max_delay=self._settings.rate_limit_max_delay,
             )
             result = await client.chat(
-                system_prompt="You observe multi-agent simulations and identify genuinely novel behavior. Be skeptical and conservative. Return only valid JSON.",
+                system_prompt=self._system_prompt,
                 messages=[{"role": "user", "content": prompt}],
                 tools=[],
             )
             if result is None:
-                return "[]"
+                return '{"bonuses": [], "new_system_prompt": null}'
             text, _ = result
-            return text or "[]"
+            return text or '{"bonuses": [], "new_system_prompt": null}'
 
         client = OllamaClient(settings=self._settings)
         result = await client.chat(
-            system_prompt="You observe multi-agent simulations and identify genuinely novel behavior. Be skeptical and conservative. Return only valid JSON.",
+            system_prompt=self._system_prompt,
             messages=[{"role": "user", "content": prompt}],
             tools=[],
         )
         if result is None:
-            return "[]"
+            return '{"bonuses": [], "new_system_prompt": null}'
         text, _ = result
-        return text or "[]"
+        return text or '{"bonuses": [], "new_system_prompt": null}'
 
     @staticmethod
     def _strip_code_fences(text: str) -> str:
-        """Remove markdown code fences (```json ... ```) from LLM response."""
         stripped = text.strip()
         if stripped.startswith("```"):
             first_newline = stripped.find("\n")
@@ -194,48 +186,27 @@ class Overseer:
             stripped = stripped.strip()
         return stripped
 
-    def _parse_response(self, response: str) -> list[dict[str, Any]]:
+    def _parse_response(self, response: str) -> dict[str, Any]:
         cleaned = self._strip_code_fences(response)
         try:
             parsed = json.loads(cleaned)
         except json.JSONDecodeError:
-            return []
+            return {"bonuses": [], "new_system_prompt": None}
 
-        if isinstance(parsed, dict) and isinstance(parsed.get("evaluations"), list):
-            parsed = parsed["evaluations"]
+        if isinstance(parsed, list):
+            if parsed and isinstance(parsed[0], dict):
+                return {"bonuses": parsed, "new_system_prompt": None}
+            return {"bonuses": [], "new_system_prompt": None}
 
-        if not isinstance(parsed, list):
-            return []
+        if not isinstance(parsed, dict):
+            return {"bonuses": [], "new_system_prompt": None}
 
-        normalized: list[dict[str, Any]] = []
-        for item in parsed:
-            if not isinstance(item, dict):
-                continue
-            agent_id = str(item.get("agent_id", "")).strip()
-            if not agent_id:
-                continue
-            tags_obj = item.get("tags", [])
-            tags = [str(x) for x in tags_obj] if isinstance(tags_obj, list) else []
-            try:
-                bonus = float(item.get("bonus", 0.0))
-            except (TypeError, ValueError):
-                bonus = 0.0
-            normalized.append(
-                {
-                    "agent_id": agent_id,
-                    "bonus": bonus,
-                    "reasoning": str(item.get("reasoning", "")),
-                    "tags": tags,
-                }
-            )
-        return normalized
+        bonuses = parsed.get("bonuses", parsed.get("evaluations", []))
+        if not isinstance(bonuses, list):
+            bonuses = []
 
-    def _update_archive(self, evaluations: list[dict[str, Any]]) -> None:
-        for item in evaluations:
-            self._archive.append(
-                {
-                    "agent_id": item.get("agent_id", ""),
-                    "reasoning": item.get("reasoning", ""),
-                    "tags": list(item.get("tags", [])),
-                }
-            )
+        new_prompt = parsed.get("new_system_prompt")
+        if new_prompt is not None and not isinstance(new_prompt, str):
+            new_prompt = None
+
+        return {"bonuses": bonuses, "new_system_prompt": new_prompt}

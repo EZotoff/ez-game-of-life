@@ -86,6 +86,9 @@ class OllamaClient:
         max_retry_delay_seconds: float = 30.0,
         tool_parser: ToolParserProtocol | None = None,
         tool_registry: ToolRegistryProtocol | None = None,
+        rate_limit_max_retries: int = 0,
+        rate_limit_initial_delay: float = 2.0,
+        rate_limit_max_delay: float = 120.0,
     ) -> None:
         resolved_settings = settings or Settings.from_yaml()
         resolved_base_url = (base_url or resolved_settings.ollama_base_url).rstrip("/")
@@ -103,6 +106,9 @@ class OllamaClient:
         self.timeout_seconds: float = timeout_seconds
         self.retry_count: int = retry_count
         self.max_retry_delay_seconds: float = max_retry_delay_seconds
+        self.rate_limit_max_retries: int = rate_limit_max_retries
+        self.rate_limit_initial_delay: float = rate_limit_initial_delay
+        self.rate_limit_max_delay: float = rate_limit_max_delay
 
         if tool_parser is not None:
             self.tool_parser: ToolParserProtocol = tool_parser
@@ -146,6 +152,43 @@ class OllamaClient:
                     logger.error("Ollama model not found (404): %s", self.model_name)
                     return None
 
+                if response.status_code == 429:
+                    rl_delay = self.rate_limit_initial_delay
+                    rl_attempt = 0
+                    while True:
+                        wait = min(rl_delay, self.rate_limit_max_delay)
+                        logger.warning(
+                            "Ollama rate limited (429), pausing %.1fs before retry "
+                            "(attempt %d, max_retries=%s)",
+                            wait,
+                            rl_attempt + 1,
+                            "∞"
+                            if self.rate_limit_max_retries == 0
+                            else str(self.rate_limit_max_retries),
+                        )
+                        await asyncio.sleep(wait)
+
+                        async with httpx.AsyncClient(
+                            timeout=httpx.Timeout(self.timeout_seconds)
+                        ) as rl_client:
+                            response = await rl_client.post(self.chat_url, json=payload)
+
+                        if response.status_code != 429:
+                            break
+
+                        rl_attempt += 1
+                        if (
+                            self.rate_limit_max_retries > 0
+                            and rl_attempt >= self.rate_limit_max_retries
+                        ):
+                            logger.error(
+                                "Ollama rate limited after %d retries, giving up",
+                                rl_attempt,
+                            )
+                            return None
+
+                        rl_delay = min(rl_delay * 2, self.rate_limit_max_delay)
+
                 if response.status_code >= 500:
                     raise httpx.HTTPStatusError(
                         f"Ollama server error: {response.status_code}",
@@ -179,7 +222,7 @@ class OllamaClient:
 
             except httpx.HTTPStatusError as exc:
                 status_code = exc.response.status_code if exc.response else None
-                retryable = status_code in {429, 500, 502, 503, 504}
+                retryable = status_code in {500, 502, 503, 504}
                 if not retryable or attempt >= self.retry_count:
                     logger.exception("Fatal HTTP error from Ollama: %s", exc)
                     raise

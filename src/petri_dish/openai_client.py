@@ -24,6 +24,9 @@ class OpenAICompatibleClient:
         max_retries: int = 3,
         max_retry_delay_seconds: float = 30.0,
         temperature: float = 0.8,
+        rate_limit_max_retries: int = 0,
+        rate_limit_initial_delay: float = 2.0,
+        rate_limit_max_delay: float = 120.0,
     ) -> None:
         self.api_key = api_key or os.getenv("ZAI_API_KEY", "")
         self.base_url = base_url.rstrip("/")
@@ -32,6 +35,9 @@ class OpenAICompatibleClient:
         self.max_retries = max_retries
         self.max_retry_delay_seconds = max_retry_delay_seconds
         self.temperature = temperature
+        self.rate_limit_max_retries = rate_limit_max_retries
+        self.rate_limit_initial_delay = rate_limit_initial_delay
+        self.rate_limit_max_delay = rate_limit_max_delay
 
         if not self.api_key:
             logger.warning(
@@ -93,14 +99,47 @@ class OpenAICompatibleClient:
 
                 if response.status_code == 429:
                     retry_after = response.headers.get("retry-after")
-                    wait = float(retry_after) if retry_after else delay
-                    if attempt < self.max_retries:
-                        logger.warning("Rate limited (429), retrying in %.1fs", wait)
-                        await asyncio.sleep(min(wait, self.max_retry_delay_seconds))
-                        delay = min(delay * 2, self.max_retry_delay_seconds)
-                        continue
-                    logger.error("Rate limited after %d retries", attempt + 1)
-                    return None
+                    rl_delay = self.rate_limit_initial_delay
+                    rl_attempt = 0
+                    while True:
+                        wait = float(retry_after) if retry_after else rl_delay
+                        wait = min(wait, self.rate_limit_max_delay)
+                        logger.warning(
+                            "Rate limited (429), pausing %.1fs before retry "
+                            "(attempt %d, max_retries=%s)",
+                            wait,
+                            rl_attempt + 1,
+                            "∞"
+                            if self.rate_limit_max_retries == 0
+                            else str(self.rate_limit_max_retries),
+                        )
+                        await asyncio.sleep(wait)
+
+                        async with httpx.AsyncClient(
+                            timeout=httpx.Timeout(self.timeout_seconds)
+                        ) as retry_client:
+                            response = await retry_client.post(
+                                f"{self.base_url}/chat/completions",
+                                json=payload,
+                                headers=headers,
+                            )
+
+                        if response.status_code != 429:
+                            break
+
+                        rl_attempt += 1
+                        if (
+                            self.rate_limit_max_retries > 0
+                            and rl_attempt >= self.rate_limit_max_retries
+                        ):
+                            logger.error(
+                                "Rate limited after %d retries, giving up",
+                                rl_attempt,
+                            )
+                            return None
+
+                        rl_delay = min(rl_delay * 2, self.rate_limit_max_delay)
+                        retry_after = response.headers.get("retry-after")
 
                 if response.status_code == 400:
                     logger.error(
