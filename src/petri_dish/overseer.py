@@ -25,13 +25,18 @@ class Overseer:
             "When you see behavior that surprises you — something you haven't seen "
             "these agents do before — reward it with zod. You decide what counts as "
             "novel. Trust your judgment.\n\n"
+            "You also DROP provocations into the shared filesystem — questions, "
+            "dilemmas, paradoxes, challenges designed to provoke interesting behavior. "
+            "These are not tasks. They are seeds. Tailor them to what you observe.\n\n"
             "You CAN rewrite your own system prompt. If you think you'd evaluate "
             "better with different criteria, change it. Include "
-            '"new_system_prompt": "..." in your response alongside any bonuses.\n\n'
+            '"new_system_prompt": "..." in your response.\n\n'
             "Return JSON:\n"
             '{"bonuses": [{"agent_id": str, "bonus": float, "reasoning": str}], '
+            '"provocation": null or {"filename": str, "content": str}, '
             '"new_system_prompt": null or string}\n'
-            'If nothing is novel, return {"bonuses": [], "new_system_prompt": null}'
+            'If nothing is novel, return {"bonuses": [], "provocation": null, '
+            '"new_system_prompt": null}'
         )
 
     async def maybe_evaluate(
@@ -39,11 +44,11 @@ class Overseer:
         run_id: str,
         turn: int,
         trait_vectors: dict[str, dict[str, float | dict[str, float]]] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], dict[str, str] | None]:
         if not self._settings.overseer_enabled:
-            return []
+            return [], None
         if turn <= 0 or (turn % self._evaluation_interval) != 0:
-            return []
+            return [], None
 
         prompt = self._build_prompt(run_id, turn, trait_vectors or {})
         logger.warning("Overseer turn %d: prompt %d chars", turn, len(prompt))
@@ -59,8 +64,19 @@ class Overseer:
             )
 
         evaluations = result.get("bonuses", [])
-        if not evaluations:
-            return []
+
+        provocation = result.get("provocation")
+        artifact: dict[str, str] | None = None
+        if isinstance(provocation, dict) and provocation.get("content"):
+            filename = provocation.get("filename", f"provocation_t{turn}.txt")
+            artifact = {
+                "filename": str(filename),
+                "content": str(provocation["content"]),
+            }
+            logger.warning("Overseer provocation: %s", artifact["content"][:200])
+
+        if not evaluations and not artifact:
+            return [], None
 
         capped: list[dict[str, Any]] = []
         total = 0.0
@@ -98,7 +114,7 @@ class Overseer:
                 evaluation_json=json.dumps(normalized),
             )
 
-        return capped
+        return capped, artifact
 
     def _build_prompt(
         self,

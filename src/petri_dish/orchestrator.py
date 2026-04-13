@@ -813,6 +813,8 @@ class MultiAgentOrchestrator:
         self._round = 0
         self._termination_reason = "unknown"
         self._global_consecutive_empty = 0
+        self._round_tool_names: list[str] = []
+        self._round_message_count = 0
 
         self._msg_store = _MessageStore()
         set_message_store(self._msg_store)
@@ -1004,6 +1006,7 @@ class MultiAgentOrchestrator:
                     break
 
                 self._round += 1
+                self._reset_round_tracking()
                 if self._round > self.max_rounds:
                     self._round = self.max_rounds
                     self._termination_reason = "max_rounds_reached"
@@ -1246,6 +1249,9 @@ class MultiAgentOrchestrator:
                             call_start = time.perf_counter()
                             self._state = OrchestratorState.EXECUTING_TOOL
                             before_tool = economy.get_balance()
+                            self._round_tool_names.append(call.name)
+                            if call.name == "send_message":
+                                self._round_message_count += 1
                             result = ""
                             try:
                                 container_id = self._agent_containers.get(agent_id, "")
@@ -1393,7 +1399,7 @@ class MultiAgentOrchestrator:
                     if self._traits is not None:
                         for aid in self.agent_ids:
                             trait_vectors[aid] = self._traits.get_traits(aid).to_dict()
-                    evaluations = await self._overseer.maybe_evaluate(
+                    evaluations, artifact = await self._overseer.maybe_evaluate(
                         run_id=run_id,
                         turn=self._round,
                         trait_vectors=trait_vectors,
@@ -1410,6 +1416,34 @@ class MultiAgentOrchestrator:
                                 ev.get("reasoning", "")[:120],
                                 agent_id=agent_id,
                             )
+                    if artifact and self._shared_volume_dir:
+                        target = Path(self._shared_volume_dir) / artifact["filename"]
+                        target.write_text(artifact["content"])
+                        self.logging_db.log_file_drop(
+                            run_id,
+                            artifact["filename"],
+                            "overseer_provocation",
+                        )
+
+                # Entropic UBI
+                if self.settings.base_income_per_turn > 0:
+                    entropy = self._compute_entropy()
+                    window = max(1, self.settings.entropy_window_turns)
+                    scale = min(1.0, entropy / window)
+                    ubi = self.settings.ubi_min + scale * (
+                        self.settings.ubi_max - self.settings.ubi_min
+                    )
+                    for aid in self.agent_ids:
+                        econ = self.shared_economy.get_agent_economy(aid)
+                        if not econ.is_dead():
+                            self.shared_economy.grant(aid, ubi)
+                    self.logging_db.log_event(
+                        run_id,
+                        self._round,
+                        "system",
+                        "ubi_grant",
+                        f"ubi={ubi:.3f} entropy={entropy:.1f}",
+                    )
 
             agent_results = {}
             for aid in self.agent_ids:
@@ -1549,6 +1583,16 @@ class MultiAgentOrchestrator:
                         _ToolCallPayload(name=name.strip(), arguments=arguments)
                     )
         return normalized
+
+    def _compute_entropy(self) -> float:
+        unique_tools = len(set(self._round_tool_names))
+        unique_ratio = unique_tools / max(1, len(self._round_tool_names))
+        msg_density = min(1.0, self._round_message_count / max(1, len(self.agent_ids)))
+        return unique_ratio + msg_density
+
+    def _reset_round_tracking(self) -> None:
+        self._round_tool_names = []
+        self._round_message_count = 0
 
     def _drop_ecology_files(self, run_id: str) -> None:
         if not self._ecology:

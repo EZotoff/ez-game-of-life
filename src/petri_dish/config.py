@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     rate_limit_max_delay: float = 600.0
     llm_inter_call_delay: float = 2.0
 
+    # Entropic UBI (artificial resourcefulness mode)
+    base_income_per_turn: float = 0.3
+    entropy_window_turns: int = 5
+    ubi_min: float = 0.1
+    ubi_max: float = 0.8
+
     # Docker Container Parameters
     docker_image: str = "python:3.12-slim"
     docker_mem_limit: str = "512m"
