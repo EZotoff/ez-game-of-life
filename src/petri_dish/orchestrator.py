@@ -1128,10 +1128,14 @@ class MultiAgentOrchestrator:
                     self._state = OrchestratorState.WAITING_FOR_LLM
                     client = self._get_llm_client(agent_id)
                     _agent_prompt = self._build_agent_prompt(agent_id)
+                    msgs = self._agent_messages[agent_id]
+                    max_msgs = self.settings.max_agent_messages
+                    if len(msgs) > max_msgs:
+                        msgs[:] = msgs[-max_msgs:]
                     _llm_start = time.perf_counter()
                     llm_result = await client.chat(
                         system_prompt=_agent_prompt,
-                        messages=self._agent_messages[agent_id],
+                        messages=msgs,
                         tools=tools_schemas,
                     )
                     _llm_elapsed_ms = (time.perf_counter() - _llm_start) * 1000

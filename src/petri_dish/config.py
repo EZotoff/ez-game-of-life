@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     # Model and Context Parameters
     context_window_tokens: int = 8192
     context_summary_interval_turns: int = 40
+    max_agent_messages: int = 60
     model_name: str = "qwen3.5:9b-q4_K_M"
     ollama_base_url: str = "http://localhost:11434"
     default_temperature: float = 0.8

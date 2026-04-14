@@ -354,7 +354,11 @@ class ResourceEcology:
         """
         files_to_drop: list[tuple[str, str]] = []
 
-        if current_turn > 0 and current_turn % self._drop_interval == 0:
+        if (
+            current_turn > 0
+            and self._drop_interval > 0
+            and current_turn % self._drop_interval == 0
+        ):
             family = random.choice(self.FAMILIES)
             difficulty = random.choice(self.DIFFICULTIES)
             files_to_drop.append(self.generate_file(family, difficulty))
