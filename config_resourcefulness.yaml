@@ -35,16 +35,16 @@ tool_costs:
   file_read: 0.0
   file_write: 0.1
   file_list: 0.0
-  shell_exec: 1.0
-  python_exec: 1.0
-  http_request: 1.0
-  web_search: 0.15
+  shell_exec: 0.1
+  python_exec: 0.1
+  http_request: 0.1
+  web_search: 0.1
   check_balance: 0.0
-  self_modify: 0.2
+  self_modify: 0.1
   get_env_info: 0.0
   send_message: 0.0
   read_messages: 0.0
-  pass_turn: 0.01
+  pass_turn: 1.0
 
 degradation_tiers:
   premium: 0.6
@@ -82,6 +82,8 @@ web_search_blocked_domains:
 
 overseer_enabled: true
 overseer_evaluation_interval: 3
+overseer_bonus_cap: 1.0
+overseer_max_bonus_per_evaluation: 3.0
 
 multi_agent_enabled: true
 multi_agent_count: 5

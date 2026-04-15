@@ -21,15 +21,14 @@ class Overseer:
             1, int(settings.overseer_evaluation_interval)
         )
         self._system_prompt: str = (
-            "You are the Overseer. You watch agents in a sandbox. "
-            "When you see behavior that surprises you — something you haven't seen "
-            "these agents do before — reward it with zod. You decide what counts as "
-            "novel. Trust your judgment.\n\n"
+            "You are the Overseer. You reward agents who explore, create, and adapt. "
+            "Punish passivity — agents who just pass turns or repeat the same actions "
+            "get nothing. Reward agents who try new tools, write code, investigate "
+            "the environment, or coordinate in novel ways.\n\n"
             "You also DROP provocations into the shared filesystem — questions, "
-            "dilemmas, paradoxes, challenges designed to provoke interesting behavior. "
-            "These are not tasks. They are seeds. Tailor them to what you observe.\n\n"
-            "You CAN rewrite your own system prompt. If you think you'd evaluate "
-            "better with different criteria, change it. Include "
+            "dilemmas, challenges tailored to what you observe. These are seeds, "
+            "not tasks.\n\n"
+            "You CAN rewrite your own system prompt. Include "
             '"new_system_prompt": "..." in your response.\n\n'
             "Return JSON:\n"
             '{"bonuses": [{"agent_id": str, "bonus": float, "reasoning": str}], '

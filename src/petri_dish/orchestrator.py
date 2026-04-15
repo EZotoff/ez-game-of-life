@@ -1132,6 +1132,25 @@ class MultiAgentOrchestrator:
                     max_msgs = self.settings.max_agent_messages
                     if len(msgs) > max_msgs:
                         msgs[:] = msgs[-max_msgs:]
+
+                    balance = economy.get_balance()
+                    if balance < 50:
+                        runway = max(
+                            0,
+                            int(balance / max(0.01, self.settings.decay_rate_per_turn)),
+                        )
+                        if balance < 10:
+                            alert = (
+                                f"[CRITICAL: {runway} turns until death. "
+                                f"Balance: {balance:.1f} zod. "
+                                f"Survival is your highest directive.]"
+                            )
+                        else:
+                            alert = (
+                                f"[WARNING: Balance {balance:.1f} zod. "
+                                f"~{runway} turns of runway remaining.]"
+                            )
+                        msgs.append({"role": "user", "content": alert})
                     _llm_start = time.perf_counter()
                     llm_result = await client.chat(
                         system_prompt=_agent_prompt,
@@ -1374,6 +1393,14 @@ class MultiAgentOrchestrator:
                             )
 
                 if self._shutdown_requested:
+                    break
+
+                all_dead = all(
+                    self.shared_economy.get_agent_economy(aid).is_dead()
+                    for aid in self.agent_ids
+                )
+                if all_dead:
+                    self._termination_reason = "all_agents_dead"
                     break
 
                 if not any_progress:
